@@ -44,6 +44,20 @@ PORT=8080 pi-web                # environment variable is also supported
 - **See session state clearly**: context usage, cost, compaction state, and system prompt details are visible from the top bar.
 - **Configure less from the terminal**: manage models, login/API keys, model tests, and skill switches from the web UI.
 
+## Customizations (this fork)
+
+This fork keeps all upstream features and adds the following changes:
+
+- **Universal file upload**: the upload button (➕) now accepts any file format, not just images. Uploaded files are written to `uploads/` under the session working directory, named `<timestamp>-<sha256[16]>-<original-name>`, and inserted into the input box as `@uploads/<name>` mentions. The agent reads them via its normal `@path` mechanism, so the previous inline base64 / `images` pipeline has been removed entirely — images go through the same path.
+- **New `/api/uploads` route**: multipart endpoint that lands files in `${cwd}/uploads/` (25 MB per file) and returns the cwd-relative paths for `@` insertion.
+- **Branch button relocated**: the Branch button moved from the top bar to the input bar controls (between Session Info and System); opening it still uses the top drawer like Session Info and System.
+- **Sound button repositioned** to the far right of the controls.
+- **Branding simplified**: the logo/title is `Pi Agent` everywhere (the `Web` suffix and the `web/pi` version numbers on the welcome screen were removed).
+- **Welcome screen**: shows a random encouraging line above the input box.
+- **Input box hints**: placeholder now notes `Enter` to send, `Shift+Enter` for a newline; the Send button is icon-only (the "Send" label was removed).
+- **Popup layering fix**: slash-command and `@file` menus now use `position: fixed` so they are no longer clipped/covered by the top bar on the welcome screen.
+- **Worktree switcher hidden**: the sidebar Git worktree switcher and its "Git repository root only" hint are hidden in the UI via a `WORKTREE_UI_HIDDEN` flag (`components/SessionSidebar.tsx`). The underlying logic is intact — flip the flag to `false` to bring it back.
+
 ## Notes
 
 - **Data directory**: pi-web reads `~/.pi/agent/sessions` by default. Set `PI_CODING_AGENT_DIR` to point at another pi agent directory.
@@ -86,11 +100,12 @@ app/
     models-config/  # read/write models.json and test models
     sessions/       # session reads, rename, delete, context, HTML export
     skills/         # skill listing, search, install, enable/disable
+    uploads/        # multipart file upload, writes to ${cwd}/uploads/
 components/
   AppShell.tsx        # main layout, URL state, top panels, file tabs
   SessionSidebar.tsx  # project selector, session tree, Explorer
-  ChatWindow.tsx      # messages, SSE, image drag/drop, minimap
-  ChatInput.tsx       # input bar, model/tools/thinking/compact/slash controls
+  ChatWindow.tsx      # messages, SSE, file drag/drop, minimap
+  ChatInput.tsx       # input bar, file upload, model/tools/thinking/compact/slash controls
   MessageView.tsx     # message, thinking, tool call/result rendering
   ModelsConfig.tsx    # model and auth configuration panel
   SkillsConfig.tsx    # skill management panel

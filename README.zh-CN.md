@@ -40,6 +40,20 @@ PORT=8080 pi-web                # 也支持环境变量
 - **随时掌握会话状态**：在顶部就能看到上下文占用、花费、压缩结果和系统提示，长会话不再像黑箱。
 - **少离开当前界面**：模型、登录/API key、模型测试和技能开关都能在网页里处理，配置 agent 时不用在多个工具之间来回切换。
 
+## 本 fork 的定制改动
+
+这个 fork 保留了上游全部功能，并在此基础上做了以下改动：
+
+- **通用文件上传**：上传按钮（➕）现在支持任意格式文件，不再只限图片。文件会写入会话工作目录下的 `uploads/`，命名为 `<时间戳>-<sha256[16]>-<原文件名>`，并以 `@uploads/<文件名>` 引用的形式插入输入框。agent 通过原本的 `@path` 机制读取它们，因此旧的内联 base64 / `images` 链路已彻底移除——图片也走同一条路径。
+- **新增 `/api/uploads` 路由**：multipart 接口，把文件落到 `${cwd}/uploads/`（单文件上限 25 MB），返回 cwd 相对路径供 `@` 插入。
+- **分支按钮位置调整**：分支按钮从顶栏移到输入框底部控件区（会话信息和系统之间）；点击后仍像会话信息、系统那样用顶部抽屉展开。
+- **喇叭按钮**移到控件区最右侧。
+- **品牌名称简化**：logo / 标题统一为 `Pi Agent`（去掉了 `Web` 后缀和欢迎界面上的 `web/pi` 版本号）。
+- **欢迎界面**：输入框上方会随机显示一句鼓励语。
+- **输入框提示**：placeholder 标注了 `Enter` 发送、`Shift+Enter` 换行；发送按钮只保留 icon（去掉了「发送」文字）。
+- **弹窗层级修复**：斜杠命令和 `@文件` 菜单改用 `position: fixed`，修复了欢迎界面下被顶部菜单栏遮挡的问题。
+- **worktree 切换器隐藏**：侧边栏的 Git worktree 切换器及「仅限 Git 仓库根目录」提示通过 `WORKTREE_UI_HIDDEN` 开关（`components/SessionSidebar.tsx`）在前端隐藏，底层逻辑保留——把开关改回 `false` 即可恢复显示。
+
 ## 注意事项
 
 - **数据目录**：默认读取 `~/.pi/agent/sessions` 下的会话文件。可通过环境变量 `PI_CODING_AGENT_DIR` 指定其他 pi agent 目录。
@@ -82,11 +96,12 @@ app/
     models-config/  # 读写 models.json、测试模型
     sessions/       # 会话读取、重命名、删除、上下文、HTML 导出
     skills/         # skills 列表、搜索、安装、启停
+    uploads/        # multipart 文件上传，写入 ${cwd}/uploads/
 components/
   AppShell.tsx        # 主布局、URL 状态、顶部面板、文件标签
   SessionSidebar.tsx  # 项目选择、会话树、Explorer
-  ChatWindow.tsx      # 消息区、SSE、拖拽图片、minimap
-  ChatInput.tsx       # 输入栏、模型/工具/thinking/compact/slash controls
+  ChatWindow.tsx      # 消息区、SSE、文件拖拽、minimap
+  ChatInput.tsx       # 输入栏、文件上传、模型/工具/thinking/compact/slash controls
   MessageView.tsx     # 消息、thinking、tool call/result 渲染
   ModelsConfig.tsx    # 模型和认证配置面板
   SkillsConfig.tsx    # 技能管理面板
