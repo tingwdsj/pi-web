@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { existsSync, readFileSync, statSync } from "fs";
 import { basename, dirname, extname, join, relative } from "path";
 import {
@@ -18,6 +20,8 @@ import type {
   PluginScope,
   PluginsResponse,
 } from "@/lib/api-types";
+
+const execAsync = promisify(exec);
 
 export const dynamic = "force-dynamic";
 
@@ -280,8 +284,15 @@ export async function GET(req: Request) {
 
 // POST /api/plugins body: { action, source?, scope?, cwd }
 export async function POST(req: Request) {
+  // Declared outside try so the catch block can read it for failure diagnosis.
+  let body: {
+    action?: PluginAction;
+    source?: string;
+    scope?: PluginScope;
+    cwd?: string;
+  } = {};
   try {
-    const body = await req.json() as {
+    body = await req.json() as {
       action?: PluginAction;
       source?: string;
       scope?: PluginScope;
@@ -321,6 +332,58 @@ export async function POST(req: Request) {
 
     return NextResponse.json(await readPlugins(body.cwd));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    const baseMsg = error instanceof Error ? error.message : String(error);
+    // pi's DefaultPackageManager installs via `runCommand` (not the capture
+    // variant), so on failure it throws a bare `npm.cmd install ... failed
+    // with code 1` with NO stderr — the user can't tell whether the package
+    // 404'd, the network failed, or peer deps clashed. Re-run `npm view` to
+    // surface a readable reason (package not found / unreachable registry).
+    const detail = await diagnoseNpmFailure(body, baseMsg).catch(() => null);
+    return NextResponse.json(
+      { error: detail ? `${baseMsg}\n\n${detail}` : baseMsg },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * When an install/remove fails with a code-only npm error, run `npm view` to
+ * get a human-readable reason. Only meaningful for npm: sources. Returns null
+ * if it can't add anything (non-npm source, or npm view itself errors
+ * unexpectedly).
+ */
+async function diagnoseNpmFailure(
+  body: { action?: string; source?: string; cwd?: string },
+  baseMsg: string,
+): Promise<string | null> {
+  // Only diagnose install/remove failures that look like a swallowed npm code.
+  if (body.action !== "install" && body.action !== "remove") return null;
+  if (!/failed with (code|signal)/.test(baseMsg)) return null;
+
+  const source = body.source?.trim();
+  if (!source) return null;
+  // npm:source  → package spec; git:/path sources don't go through npm view.
+  const spec = source.startsWith("npm:") ? source.slice(4).trim() : null;
+  if (!spec) return null;
+
+  try {
+    // Use `exec` (shell) so Windows resolves `npm` → `npm.cmd`. The spec is a
+    // read-only package name passed to `npm view`; quote it to stay safe.
+    await execAsync(`npm view "${spec}" version`, {
+      cwd: body.cwd || undefined,
+      timeout: 20_000,
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+    // Package exists on the registry, so the install failure was something
+    // else (peer deps, permissions, prefix dir). We can't pinpoint it without
+    // stderr, but at least rule out 404.
+    return "该包在 npm registry 存在,安装失败可能是依赖冲突(--legacy-peer-deps 未解决)、权限或网络问题。建议在系统终端手动运行上述命令查看完整 npm 输出。";
+  } catch (e) {
+    const err = e as { stderr?: string; stdout?: string; message?: string };
+    const out = ((err.stderr ?? "") + (err.stdout ?? "")).trim();
+    if (out) {
+      return `npm view 输出:\n${out.slice(0, 600)}`;
+    }
+    return null;
   }
 }

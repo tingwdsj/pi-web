@@ -11,6 +11,7 @@
     "url": "https://github.com/agegr/pi-web/issues"
   },
   "license": "MIT",
+  "main": "main.cjs",
   "bin": {
     "pi-web": "bin/pi-web.js"
   },
@@ -29,7 +30,12 @@
     "build": "next build --webpack",
     "start": "next start -p 30141",
     "lint": "eslint .",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
+    "desktop:icon": "node desktop/make-icon.mjs",
+    "desktop:dev": "cross-env PI_DESKTOP_DEV=1 electron desktop/main.cjs",
+    "desktop:build:next": "cross-env NODE_OPTIONS=\"--require ./desktop/win-eperm-patch.cjs\" next build --webpack",
+    "desktop:fetch-node": "node desktop/fetch-node.cjs",
+    "desktop:build": "node desktop/fetch-node.cjs && npm run desktop:build:next && node desktop/ensure-standalone-chunks.cjs && electron-builder --config desktop/electron-builder.yml"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.80.3",
@@ -59,6 +65,9 @@
     "eslint-config-next": "16.2.9",
     "postcss": "^8",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0"
   }
 }

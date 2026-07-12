@@ -1,0 +1,97 @@
+# electron-builder config for Pi Agent desktop (NSIS, perUser, Win x64).
+# Docs: https://www.electron.build/configuration
+#
+# Build with:  npm run desktop:build
+#   (runs `next build --webpack` first to produce .next/standalone/, then this)
+#
+# Output: dist-electron/Pi Agent Setup <version>.exe
+#
+# Layout after packaging:
+#   resources/app/        <- Electron app package (main.cjs, lib, seeds, icon)
+#   resources/server/     <- Next.js standalone server (server.js + node_modules)
+# main.cjs finds the server at process.resourcesPath/server.
+
+appId: works.earendil.pi-agent
+productName: Pi Agent
+copyright: Copyright © 2026
+
+directories:
+  output: dist-electron
+  buildResources: desktop
+
+# Skip copying the project's node_modules into resources/app/. The main process
+# needs no npm deps (electron is runtime-injected; everything else is either a
+# Node builtin or a local ./lib/*.cjs). The Next server + pi SDK live in the
+# standalone bundle under resources/server/ (extraResources) with their own
+# node_modules. Without this hook, electron-builder duplicates ~740 MB of deps
+# into the app package. See desktop/skip-deps.js.
+beforeBuild: desktop/skip-deps.js
+
+# What goes into the Electron app package (resources/app/). The desktop entry
+# + helpers are FLATTENED to the app root (not kept under desktop/) so that
+# main.cjs's relative requires ("./lib/port") resolve correctly under Electron's
+# module loader.
+#
+# Syntax note (verified empirically against app-builder-lib 25.1.8):
+#   - Single-file FileSets `{from: "desktop/main.cjs", to: "main.cjs"}` do NOT
+#     work in this version (the file is silently skipped). Directory FileSets
+#     DO work: `from: "desktop", to: "."` copies desktop/main.cjs ->
+#     resources/app/main.cjs, desktop/lib/port.cjs -> resources/app/lib/port.cjs
+#     (getDestinationPath uses path.relative(src, file), stripping the desktop/
+#     prefix). So we copy the WHOLE desktop/ dir flat to the app root and use
+#     `filter` to drop build-only files we don't want shipped.
+#   - We avoid plain-string entries (like "package.json"): those create a
+#     default matcher with from=appDir that pulls in `**/*` (the entire project
+#     incl. node_modules). Instead package.json is copied via its own FileSet
+#     with from=appDir, filter ["package.json"] — no `**/*` fallback.
+files:
+  - from: desktop
+    to: .
+    filter:
+      - "**/*"
+      - "!make-icon.mjs"
+      - "!win-eperm-patch.cjs"
+      - "!electron-builder.yml"
+  - from: .
+    to: .
+    filter:
+      - "package.json"
+
+# The standalone Next server is large and self-contained; ship it as resources
+# (not inside the app package) so it sits at resources/server/server.js.
+# `from` paths are relative to the project root (package.json dir).
+extraResources:
+  - from: .next/standalone
+    to: server
+    filter: ["**/*"]
+  - from: .next/static
+    to: server/.next/static
+    filter: ["**/*"]
+  # Ship a real Node 22 runtime. The Next.js standalone server.js is run with
+  # THIS node.exe, not electron.exe (ELECTRON_RUN_AS_NODE). Reason: Electron 33
+  # embeds Node 20.18, whose built-in undici/worker_threads lacks
+  # `markAsUncloneable` — Next 16.2.9's @edge-runtime/primitives calls it, so
+  # any API route touching the pi SDK throws "webidl.util.markAsUncloneable is
+  # not a function" (HTTP 500). Node 22 has the API. Lands at resources/node/.
+  - from: desktop/node-runtime/node.exe
+    to: node/node.exe
+
+# asar disabled for v1: the pi SDK does dynamic import(), absolute-path wasm
+# reads, and package.json walk-ups that can break inside an asar archive.
+asar: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: desktop/icon.ico
+
+nsis:
+  oneClick: false                      # normal install wizard (allow dir change)
+  perMachine: false                    # perUser -> %LOCALAPPDATA%\Programs, no admin
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Pi Agent
+  uninstallDisplayName: Pi Agent

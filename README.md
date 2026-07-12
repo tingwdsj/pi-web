@@ -35,6 +35,37 @@ pi-web -p 8080 -H 127.0.0.1     # combine options
 PORT=8080 pi-web                # environment variable is also supported
 ```
 
+## Desktop app (Windows)
+
+This fork also builds into a standalone Windows desktop application — no Node.js or pi CLI install required. The pi coding engine and all LLM provider SDKs are bundled inside the `.exe`.
+
+**Build it yourself:**
+
+```bash
+npm install
+npm run desktop:build
+```
+
+This runs `next build` (standalone output) and then `electron-builder`, producing `dist-electron/Pi Agent Setup <version>.exe` — an NSIS installer that installs per-user (no admin prompt) to `%LOCALAPPDATA%\Programs\Pi Agent`.
+
+**First run:** the app seeds `~/.pi/agent/models.json` (DeepSeek only, with `$DEEPSEEK_API_KEY` placeholder) and `settings.json` if they do not already exist. The only thing you need to do is open the Models panel and enter a DeepSeek API key — then start chatting.
+
+**Coexistence with the pi CLI:** the desktop app shares the same data directory (`~/.pi/agent`) as the pi CLI. If you already use pi, the desktop app inherits your existing config, API keys, and session history — nothing is overwritten. Both can even run at the same time (they use different ports). If you prefer isolation, set `PI_CODING_AGENT_DIR` to a separate directory before launching.
+
+**Notes:**
+- Target: Windows 10 x64 (1909+ recommended). Not code-signed, so SmartScreen will warn on first install — click "More info → Run anyway".
+- No auto-update in this version; rerun `npm run desktop:build` and reinstall to upgrade.
+- Dev mode (hot reload): `npm run desktop:dev` — spawns `next dev` and an Electron window together.
+
+**Troubleshooting (if the app won't start):**
+
+- **Antivirus quarantines a file / blank window on launch.** Pi Agent ships its own Node 22 runtime at `resources/node/node.exe` and runs the UI server as a child process. Some antivirus products (Windows Defender, 360, Huorong) flag a `node.exe` launched from the user's `AppData` as suspicious and may quarantine it. If the app opens to a blank/error page, check your antivirus quarantine and restore or whitelist `node.exe` (and the install folder). This is a known cost of shipping an unsigned app.
+- **"Windows protected your PC" (SmartScreen).** This appears on first run because the installer is not code-signed. Click **More info → Run anyway**. You only need to do this once per version; the app remembers the trust.
+- **Slow first launch.** The first start can take 10–30s while the bundled server warms up (and longer if antivirus is scanning it in real time). If it exceeds ~45s the app shows a retry page — click **Retry**.
+- **Port is dynamic.** The app picks a free loopback port (`127.0.0.1`) at startup, so it never conflicts with other services and never triggers a firewall prompt.
+
+**Building from source / pitfalls:** see [docs/desktop-build.md](./docs/desktop-build.md) for the full build flow, the role of each file under `desktop/`, and the real pitfalls hit during packaging and distribution (EPERM tracing, electron-builder `files` quirks, the bundled Node 22 runtime, antivirus false positives, etc.).
+
 ## Features
 
 - **Pick work back up**: browse previous pi conversations by project without digging through terminal history or session paths.

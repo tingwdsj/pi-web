@@ -320,6 +320,12 @@ export function AppShell() {
     const link = exportLinkRef.current;
     if (!link) return;
     link.href = `/api/sessions/${encodeURIComponent(sessionId)}/export`;
+    // 显式给出建议文件名。`download` 若为空值，Chromium（含 Electron）会从
+    // URL 末段推导文件名（此处为 `export`），在 Electron 桌面端还会叠加 MIME
+    // 推导，最终出现 `export.customization` 这类错误扩展名——尽管后端已返回
+    // 正确的 `Content-Disposition: filename=pi-session-*.html`，Electron 的
+    // 下载路径在该场景下未采用它。显式赋值后浏览器直接采用，不再依赖推导。
+    link.download = `pi-session-${sessionId}.html`;
     link.click();
   }, []);
 

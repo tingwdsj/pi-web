@@ -10,7 +10,24 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
+  // Desktop packaging: produce a self-contained server in .next/standalone so
+  // the Electron app can run it with plain `node server.js` (no `next` CLI at
+  // runtime). Additive — does not affect the existing npm-CLI publish path.
+  // The pi SDK packages are serverExternalPackages, so Next traces them into
+  // standalone automatically as real node_modules. Standalone's chunk copy can
+  // miss a webpack chunk that a route's .nft.json lists (e.g. mammoth's zip
+  // code split into chunk 3379); desktop/ensure-standalone-chunks.cjs runs
+  // post-build to backfill any missing chunks.
+  output: "standalone",
   serverExternalPackages: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
+  // On some Windows machines the @vercel/nft file tracer follows a stray
+  // dependency edge into protected/irrelevant dirs under the user profile
+  // (e.g. AppData\Local\Intel\...) and aborts the build. Those paths are never
+  // real runtime dependencies — exclude the whole user-profile tree from
+  // tracing. (See desktop/win-eperm-patch.cjs for the matching fs guard.)
+  outputFileTracingExcludes: {
+    "*": ["C:\\Users\\**", "/Users/**", "/home/**"],
+  },
   allowedDevOrigins: ['192.168.*.*'],
   async headers() {
     return [

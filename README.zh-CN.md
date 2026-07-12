@@ -31,6 +31,37 @@ pi-web -p 8080 -H 127.0.0.1     # 组合使用
 PORT=8080 pi-web                # 也支持环境变量
 ```
 
+## 桌面版（Windows）
+
+本 fork 还可以打包成独立的 Windows 桌面软件——无需安装 Node.js 或 pi CLI。pi 编码引擎和各家 LLM SDK 全部内置于 `.exe` 中。
+
+**自行构建：**
+
+```bash
+npm install
+npm run desktop:build
+```
+
+会先跑 `next build`（standalone 输出），再跑 `electron-builder`，产出 `dist-electron/Pi Agent Setup <version>.exe`——一个 NSIS 安装包，按用户安装（无需管理员）到 `%LOCALAPPDATA%\Programs\Pi Agent`。
+
+**首次运行：** 程序会在 `~/.pi/agent/` 下种入 `models.json`（仅 DeepSeek，Key 用 `$DEEPSEEK_API_KEY` 占位符）和 `settings.json`（若它们尚不存在）。你唯一要做的是打开 Models 面板填入 DeepSeek API Key，然后开始对话。
+
+**与 pi CLI 共存：** 桌面版与 pi CLI 共用同一个数据目录（`~/.pi/agent`）。如果你已经在用 pi，桌面版会直接继承你已有的配置、API Key 和会话历史——绝不覆盖。两者甚至可以同时运行（各用不同端口）。若想隔离，启动前设置 `PI_CODING_AGENT_DIR` 指向独立目录即可。
+
+**注意事项：**
+- 目标系统：Windows 10 x64（建议 1909+）。未做代码签名，首次安装时 SmartScreen 会拦截，点「更多信息 → 仍要运行」即可。
+- 本版不含自动更新；升级时重新 `npm run desktop:build` 并重装。
+- 开发模式（热重载）：`npm run desktop:dev`——同时启动 `next dev` 和 Electron 窗口。
+
+**启动失败的排查：**
+
+- **杀毒软件删了文件 / 打开是白屏。** Pi Agent 内置了 Node 22 运行时（`resources/node/node.exe`），启动时会把它作为子进程拉起来跑界面服务。部分杀毒软件（Windows Defender、360、火绒等）会把「从用户目录 AppData 里跑起来的 node.exe」判定为可疑行为并隔离。如果打开后是白屏或错误页，去杀毒软件的隔离区看看，把 `node.exe`（最好整个安装目录）恢复并加入白名单/信任区。这是未签名应用的现实代价。
+- **「Windows 已保护你的电脑」（SmartScreen）。** 首次运行会弹，因为安装包没有代码签名。点「更多信息 → 仍要运行」即可，每个版本只需点一次，之后不再拦。
+- **首次启动慢。** 首次启动要等内置服务预热，通常 10–30 秒（杀毒软件实时扫描时会更久）。如果超过约 45 秒，应用会显示一个重试页——点「重试加载」即可。
+- **端口是动态的。** 应用启动时在 `127.0.0.1` 上挑一个空闲端口，所以永远不会和别的服务冲突，也不会弹防火墙「允许访问」的对话框。
+
+**从源码打包 / 踩坑记录：** 见 [docs/desktop-build.zh-CN.md](./docs/desktop-build.zh-CN.md)，包含完整打包流程、`desktop/` 下各文件职责，以及打包和分发过程中真实踩过的坑（EPERM 文件追踪、electron-builder `files` 的怪行为、内置 Node 22 运行时、杀毒软件误杀等）。
+
 ## 功能介绍
 
 - **把历史工作接回来**：打开网页就能按项目找到以前的 pi 对话，不必在终端里翻文件或记住会话路径。
