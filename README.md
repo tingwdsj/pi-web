@@ -4,36 +4,10 @@
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). pi-web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
-![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
-
 The same pi session in CLI and pi-web: structured tool calls, readable Markdown, session browsing, and cleaner results.
 
-## Quick Start
+This project is a UI/UX redesign and desktop adaptation based on the original version by @agegr. Original project: [pi-web original version](https://github.com/agegr/pi-web)
 
-**Run without installing:**
-
-```bash
-npx @agegr/pi-web@latest
-```
-
-**Or install globally:**
-
-```bash
-npm install -g @agegr/pi-web
-pi-web
-```
-
-Then open [http://localhost:30141](http://localhost:30141). The CLI will try to open the browser automatically after the server is ready.
-
-**Options:**
-
-```bash
-pi-web --port 8080              # custom port
-pi-web --hostname 127.0.0.1     # local access only
-pi-web -p 8080 -H 127.0.0.1     # combine options
-
-PORT=8080 pi-web                # environment variable is also supported
-```
 
 ## Desktop app (Windows)
 
