@@ -3,33 +3,7 @@
 [English](./README.md)
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
-
-## 快速开始
-
-**无需安装，直接运行：**
-
-```bash
-npx @agegr/pi-web@latest
-```
-
-**或全局安装后使用：**
-
-```bash
-npm install -g @agegr/pi-web
-pi-web
-```
-
-启动后打开 [http://localhost:30141](http://localhost:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。
-
-**可选参数：**
-
-```bash
-pi-web --port 8080              # 自定义端口
-pi-web --hostname 127.0.0.1     # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
-
-PORT=8080 pi-web                # 也支持环境变量
-```
+本项目是在@agegr原作者版本基础上进行UI/UX改造，并完成桌面端改造。原项目地址：[pi-web原作者版本](https://github.com/agegr/pi-web) 
 
 ## 桌面版（Windows）
 
