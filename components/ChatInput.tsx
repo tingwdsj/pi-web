@@ -351,8 +351,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         return;
       }
       const data = (await res.json()) as { paths: string[] };
-      for (const p of data.paths) {
-        insertTextAtCursor(buildAtMentionText(p, false));
+      if (data.paths.length) {
+        // Insert all mentions in ONE call. Calling insertTextAtCursor per path
+        // in a loop loses all but the last: each call reads the textarea's
+        // (still-stale) value before React's async setValue flushes to the DOM,
+        // so each path overwrites the previous one. Build a single text blob.
+        const mentions = data.paths.map((p) => buildAtMentionText(p, false)).join("");
+        insertTextAtCursor(mentions);
       }
     } finally {
       setIsUploading(false);

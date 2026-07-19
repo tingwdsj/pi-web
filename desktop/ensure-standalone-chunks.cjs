@@ -230,6 +230,46 @@ function main() {
   // 3. Backfill pi-coding-agent export resources that nft cannot trace
   //    (CLI entry + export-html templates/vendor). See syncPiExportResources.
   syncPiExportResources();
+
+  // 4. Ensure third-party npm deps used by API routes are in standalone.
+  //    On some machines @vercel/nft follows stray edges into system dirs
+  //    (Program Files\WindowsApps, .Neo4jDesktop, ...) and the resulting
+  //    "Failed to copy traced files" aborts copying that route's ENTIRE traced
+  //    set — which silently drops xlsx/adm-zip/mammoth even though they're
+  //    declared in dependencies. Backfill them from the source node_modules
+  //    (whole-package copy, like syncPiExportResources does for the SDK), then
+  //    assert presence so a residual miss fails the build rather than the user.
+  syncThirdPartyDeps();
+}
+
+// Backfill runtime third-party deps into the standalone tree, then assert.
+function syncThirdPartyDeps() {
+  const deps = ["xlsx", "adm-zip", "mammoth"];
+  const srcModules = path.join(projectRoot, "node_modules");
+  const dstModules = path.join(standaloneDir, "node_modules");
+  let synced = [];
+  for (const dep of deps) {
+    const dst = path.join(dstModules, dep);
+    if (fs.existsSync(dst)) continue; // nft already got it
+    const src = path.join(srcModules, dep);
+    if (!fs.existsSync(src)) {
+      log(`third-party ${dep}: source missing in node_modules — skipping`);
+      continue;
+    }
+    const n = copyTreeMissing(src, dst, `node_modules/${dep}`);
+    synced.push(`${dep} (${n})`);
+  }
+  if (synced.length) log(`third-party deps backfilled: ${synced.join(", ")}`);
+
+  // Final assertion: every dep must now be present.
+  const missing = deps.filter((d) => !fs.existsSync(path.join(dstModules, d)));
+  if (missing.length) {
+    log(`WARNING: third-party dep(s) STILL missing from standalone: ${missing.join(", ")}`);
+    log(`The desktop app will error at runtime (Cannot find module).`);
+    process.exitCode = 1;
+  } else {
+    log(`third-party deps present in standalone: ${deps.join(", ")}`);
+  }
 }
 
 main();

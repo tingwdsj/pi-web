@@ -2,7 +2,14 @@ export const TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
 export const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 export const DOCX_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 
-export type DocumentPreviewKind = "pdf" | "docx";
+export type DocumentPreviewKind = "pdf" | "docx" | "xlsx" | "xlsm";
+
+// Legacy binary Office formats (and others) that have no reliable pure-JS
+// parser in the browser/Node. We surface a friendly "open locally / download"
+// prompt instead of rendering them as garbage text.
+const LEGACY_BINARY_DOC_EXT = new Set([
+  "doc", "xls", "ppt", "pps", "pot", "pub", "vsd", "rtf", "hwp",
+]);
 
 export const IMAGE_EXT_TO_MIME: Record<string, string> = {
   png: "image/png",
@@ -32,6 +39,8 @@ export const AUDIO_EXT_TO_MIME: Record<string, string> = {
 export const DOCUMENT_EXT_TO_MIME: Record<DocumentPreviewKind, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
 };
 
 function getBaseName(filePath: string): string {
@@ -56,8 +65,15 @@ export function getDocumentMime(filePath: string): string | null {
 
 export function documentPreviewKind(filePath: string): DocumentPreviewKind | null {
   const ext = getFileExt(filePath);
-  if (ext === "pdf" || ext === "docx") return ext;
+  if (ext === "pdf" || ext === "docx" || ext === "xlsx" || ext === "xlsm") return ext;
   return null;
+}
+
+// Returns true for legacy binary document formats we deliberately do NOT render
+// (no reliable pure-JS parser). The UI shows a friendly prompt instead of
+// treating the binary blob as text (which produced garbled output).
+export function isLegacyBinaryDocument(filePath: string): boolean {
+  return LEGACY_BINARY_DOC_EXT.has(getFileExt(filePath));
 }
 
 export function isImagePath(filePath: string): boolean {

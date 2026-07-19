@@ -49,6 +49,64 @@ ipcMain.handle("open-external", (_event, url) => {
   }
 });
 
+// Validate a local filesystem path before handing it to shell.openPath.
+// The "open locally" buttons are user-initiated (an explicit click), so the
+// intent is the same as double-clicking the file in Explorer — we don't need
+// an allow-list. We only reject:
+//   - network (UNC) paths like \\server\share — opening those can trigger
+//     silent NTLM auth / unexpected handlers, and they're never legitimate
+//     local-preview targets;
+//   - paths containing NUL bytes or control chars (path-injection / garbage).
+// Returns { ok, resolved, error? }.
+function validateLocalPath(raw) {
+  if (typeof raw !== "string" || raw.length === 0) {
+    return { ok: false, error: "invalid-path" };
+  }
+  if (/[\x00-\x1f]/.test(raw)) {
+    return { ok: false, error: "invalid-path" };
+  }
+  const resolved = path.resolve(raw);
+  // UNC (\\server\share or //server/share) — reject before openPath sees it.
+  if (/^(?:\\\\|\/\/)[^/\\]/.test(resolved)) {
+    return { ok: false, error: "network-path-not-allowed" };
+  }
+  return { ok: true, resolved };
+}
+
+// Open a file with its OS default application (需求2: "本地打开").
+ipcMain.handle("open-file", async (_event, filePath) => {
+  const v = validateLocalPath(filePath);
+  if (!v.ok) return { ok: false, error: v.error };
+  const err = await shell.openPath(v.resolved);
+  // shell.openPath returns "" on success, or an error message string on failure.
+  return err ? { ok: false, error: err } : { ok: true };
+});
+
+// Open a directory in the OS file manager (需求3: "在文件管理器中打开").
+ipcMain.handle("open-folder", async (_event, dirPath) => {
+  const v = validateLocalPath(dirPath);
+  if (!v.ok) return { ok: false, error: v.error };
+  const err = await shell.openPath(v.resolved);
+  return err ? { ok: false, error: err } : { ok: true };
+});
+
+// Show the OS native directory picker and return the chosen path
+// (新需求: "选择项目目录" 下拉里的 "浏览本地文件夹" 项).
+// Returns { ok:true, path } on choice, or { ok:false, canceled:true } when the
+// user dismisses the dialog. Desktop-only — browsers cannot read a real disk
+// path from a picker, so the UI button is hidden when the bridge is absent.
+ipcMain.handle("pick-directory", async () => {
+  if (!mainWindow) return { ok: false, error: "no-window" };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "选择项目目录",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths.length) {
+    return { ok: false, canceled: true };
+  }
+  return { ok: true, path: result.filePaths[0] };
+});
+
 // Show a local diagnostic page when the Next server fails to start or load.
 // Uses a data: URL so it works even if the server never came up. The Retry
 // button reloads the real app URL (useful if the server was just slow); if

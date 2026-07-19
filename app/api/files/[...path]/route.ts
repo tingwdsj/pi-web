@@ -16,6 +16,7 @@ import {
   getDocumentMime,
   getFileExt,
   getImageMime,
+  isLegacyBinaryDocument,
 } from "@/lib/file-types";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
 
@@ -188,7 +189,65 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function wrapDocxPreviewHtml(bodyHtml: string, fileName: string): string {
+// Decode a buffer as text, transparently handling non-UTF-8 encodings.
+// Files written by Windows tools in zh-CN are frequently GBK/GB18030, which
+// naively read as utf-8 produces mojibake (e.g. Chinese doc text rendered as
+// "鏂囨。" garbage). Strategy: validate as strict UTF-8 first; only if that
+// fails do we fall back to GBK (which also covers GB18030's common subset).
+function decodeTextBuffer(buf: Buffer): string {
+  try {
+    // Strict UTF-8 decode — throws on invalid sequences.
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    try {
+      return new TextDecoder("gbk").decode(buf);
+    } catch {
+      // Last resort: lossy latin1 so at least ASCII is readable.
+      return buf.toString("latin1");
+    }
+  }
+}
+
+// Escape a cell value for safe HTML table output, preserving newlines as <br>.
+function escapeCell(value: unknown): string {
+  const s = value == null ? "" : String(value);
+  return escapeHtml(s).replace(/\r\n|\r|\n/g, "<br>");
+}
+
+// Convert an .xlsx/.xlsm workbook to a single self-contained HTML page of
+// tables (one per sheet). Mirrors the docx preview's iframe approach so the
+// FileViewer renders it the same way.
+async function xlsxToPreviewHtml(filePath: string): Promise<string> {
+  const XLSX = await import("xlsx");
+  const buf = fs.readFileSync(filePath);
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const sheets = wb.SheetNames.map((name) => {
+    const ws = wb.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+      header: 1,
+      raw: true,
+      defval: "",
+      blankrows: false,
+    });
+    const body = rows
+      .map(
+        (row) =>
+          `<tr>${(row as unknown[])
+            .map((cell) => `<td>${escapeCell(cell)}</td>`)
+            .join("")}</tr>`,
+      )
+      .join("");
+    return `<section class="sheet"><h2 class="sheet-name">${escapeHtml(name)}</h2>` +
+      `<div class="table-scroll"><table><tbody>${body}</tbody></table></div></section>`;
+  }).join("");
+
+  return wrapOfficePreviewHtml(
+    sheets || '<p class="empty">（工作簿中没有数据）</p>',
+    path.basename(filePath),
+  );
+}
+
+function wrapOfficePreviewHtml(bodyHtml: string, fileName: string): string {
   return `<!doctype html>
 <html>
 <head>
@@ -222,6 +281,12 @@ function wrapDocxPreviewHtml(bodyHtml: string, fileName: string): string {
   img { max-width: 100%; height: auto; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   a { color: #2563eb; }
+  .sheet { margin-bottom: 32px; }
+  .sheet-name { font-size: 15px; color: #374151; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #f0f0f0; }
+  .table-scroll { overflow: auto; max-width: 100%; }
+  .sheet table { font-size: 13px; }
+  .sheet td { white-space: pre; }
+  .empty { color: #6b7280; }
   @media (max-width: 720px) {
     body { padding: 0; background: #fff; }
     main { min-height: 100vh; padding: 28px 22px; box-shadow: none; }
@@ -290,7 +355,9 @@ export async function GET(
       if (stat.size > TEXT_PREVIEW_MAX_BYTES) {
         return NextResponse.json({ error: "File too large for preview (>256KB)" }, { status: 413 });
       }
-      const content = fs.readFileSync(filePath, "utf-8");
+      // Decode with GBK fallback so Windows zh-CN text files don't render as
+      // mojibake. Pure-ASCII/UTF-8 files are unaffected (strict UTF-8 passes).
+      const content = decodeTextBuffer(fs.readFileSync(filePath));
       const language = getLanguage(filePath);
       return NextResponse.json({ content, language, size: stat.size });
     }
@@ -315,6 +382,7 @@ export async function GET(
         language: getLanguage(filePath),
         mime: imageMime || audioMime || documentMime || "text/plain",
         previewKind: documentPreviewKind(filePath),
+        legacyDoc: isLegacyBinaryDocument(filePath),
       });
     }
 
@@ -322,22 +390,29 @@ export async function GET(
       if (!stat.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
-      if (getFileExt(filePath) !== "docx") {
+      const ext = getFileExt(filePath);
+      const kind = documentPreviewKind(filePath);
+      if (kind !== "docx" && kind !== "xlsx" && kind !== "xlsm") {
         return NextResponse.json({ error: "Preview not available for this file type" }, { status: 400 });
       }
       if (stat.size > DOCX_PREVIEW_MAX_BYTES) {
-        return NextResponse.json({ error: "DOCX too large for preview (>10MB)" }, { status: 413 });
+        return NextResponse.json({ error: "File too large for preview (>10MB)" }, { status: 413 });
       }
 
-      const mammoth = await import("mammoth");
-      const result = await mammoth.convertToHtml(
-        { path: filePath },
-        {
-          externalFileAccess: false,
-          convertImage: mammoth.images.dataUri,
-        }
-      );
-      const html = wrapDocxPreviewHtml(result.value, path.basename(filePath));
+      let html: string;
+      if (ext === "xlsx" || ext === "xlsm") {
+        html = await xlsxToPreviewHtml(filePath);
+      } else {
+        const mammoth = await import("mammoth");
+        const result = await mammoth.convertToHtml(
+          { path: filePath },
+          {
+            externalFileAccess: false,
+            convertImage: mammoth.images.dataUri,
+          }
+        );
+        html = wrapOfficePreviewHtml(result.value, path.basename(filePath));
+      }
       return new Response(html, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",

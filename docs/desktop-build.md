@@ -91,6 +91,18 @@ npm run desktop:dev      # cross-env PI_DESKTOP_DEV=1 electron desktop/main.cjs
 
 In dev, `main.cjs` spawns `next dev` (fixed port 30141) instead of the standalone server, and skips the Node 22 runtime (uses the dev environment's Node).
 
+> **Dev-mode limitation**: in dev, `next dev` runs under **Electron's embedded Node 20.18**. pi SDK's bundled `undici` needs a newer Node and throws `webidl.util.markAsUncloneable is not a function`, crashing on session load. **Dev is only for pure front-end UI work**; anything touching the pi SDK server path (sending messages, running agents, xlsx preview, skill zip upload) must be tested in a **full build** (`npm run desktop:build`, Node 22 runtime).
+
+### Known build pitfall: third-party deps (xlsx / adm-zip / mammoth) missing from standalone
+
+**Symptom**: during `next build`, `@vercel/nft` follows dependency edges into system dirs (`C:\Program Files\WindowsApps\` — Bandisoft, PowerAutomate — and `~/.Neo4jDesktop`), emitting a stream of `⚠ Failed to copy traced files`. This **drops the affected route's entire traced set from `.next/standalone`**, silently leaving `xlsx`, `adm-zip`, and even the long-used `mammoth` out of the bundle. The build succeeds, but users get `Cannot find module 'xlsx'` at runtime (xlsx preview, skill zip upload, docx preview all break).
+
+**Fix** (already in code):
+1. `next.config.ts` `outputFileTracingExcludes` also excludes `C:\Program Files\**` and `(x86)` to reduce stray tracing at the source.
+2. `desktop/ensure-standalone-chunks.cjs` gained `syncThirdPartyDeps()`: instead of relying on nft, it **copies `xlsx` / `adm-zip` / `mammoth` wholesale from the source `node_modules` into standalone**, then asserts all three are present — missing ones set `exitCode = 1` so the build fails rather than shipping a broken app.
+
+**Verify**: the build log should show `third-party deps backfilled: xlsx (26), adm-zip (19), mammoth (144)` and `third-party deps present in standalone: ...`. A `STILL missing` warning means the backfill failed and the build aborts — don't ignore it.
+
 ---
 
 ## 3. File Responsibilities

@@ -4,36 +4,10 @@
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). pi-web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
-![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
-
 The same pi session in CLI and pi-web: structured tool calls, readable Markdown, session browsing, and cleaner results.
 
-## Quick Start
+This project is a UI/UX redesign and desktop adaptation based on the original version by @agegr. Original project: [pi-web original version](https://github.com/agegr/pi-web)
 
-**Run without installing:**
-
-```bash
-npx @agegr/pi-web@latest
-```
-
-**Or install globally:**
-
-```bash
-npm install -g @agegr/pi-web
-pi-web
-```
-
-Then open [http://localhost:30141](http://localhost:30141). The CLI will try to open the browser automatically after the server is ready.
-
-**Options:**
-
-```bash
-pi-web --port 8080              # custom port
-pi-web --hostname 127.0.0.1     # local access only
-pi-web -p 8080 -H 127.0.0.1     # combine options
-
-PORT=8080 pi-web                # environment variable is also supported
-```
 
 ## Desktop app (Windows)
 
@@ -88,6 +62,17 @@ This fork keeps all upstream features and adds the following changes:
 - **Input box hints**: placeholder now notes `Enter` to send, `Shift+Enter` for a newline; the Send button is icon-only (the "Send" label was removed).
 - **Popup layering fix**: slash-command and `@file` menus now use `position: fixed` so they are no longer clipped/covered by the top bar on the welcome screen.
 - **Worktree switcher hidden**: the sidebar Git worktree switcher and its "Git repository root only" hint are hidden in the UI via a `WORKTREE_UI_HIDDEN` flag (`components/SessionSidebar.tsx`). The underlying logic is intact — flip the flag to `false` to bring it back.
+
+### New in 0.8.0
+
+- **Excel preview**: `.xlsx` / `.xlsm` files are rendered as HTML tables via SheetJS (`xlsx`), one table per sheet.
+- **Legacy binary doc prompt**: old binary formats (`.doc` / `.xls` / `.ppt` / `.rtf` / ...) no longer render as garbled text — a friendly notice is shown that guides to "Open locally" (desktop only). Detection: `isLegacyBinaryDocument` in `lib/file-types.ts`.
+- **Open locally**: a button next to Download opens the current file with its OS default application (desktop only; hidden in browser). IPC: `piDesktop.openFile` → `shell.openPath`, with UNC-path and control-char filtering.
+- **Open in file manager**: a folder icon next to the file-tree refresh button opens the current project root (cwd) in the OS file manager (desktop only; hidden in browser).
+- **Close all preview tabs**: a "✕ close all" button at the right of the preview tab bar closes every preview tab at once and collapses the right panel.
+- **Skill zip upload**: "Skills → Add" accepts a skill zip — supports `SKILL.md` at the archive root or inside a single subdir, errors on name conflict, and includes path-traversal + zip-bomb protection (`lib/skill-zip.ts`: 10 MB/file, 50 MB total, 2000 entries max).
+- **Multi-file upload fix**: selecting multiple files in the input box used to show only one path; all paths are now inserted correctly.
+- **Browse local folder**: the project-directory dropdown has a new "Browse local folder…" entry that opens the OS native directory picker (desktop only; browsers can't read a real disk path from a picker so the button is hidden — the manual "Custom path…" entry still works).
 
 ## Notes
 

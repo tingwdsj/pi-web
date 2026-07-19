@@ -302,6 +302,13 @@ export function AppShell() {
     });
   }, [fileTabs]);
 
+  // Close every open file tab at once.
+  const handleCloseAllFileTabs = useCallback(() => {
+    setFileTabs([]);
+    setActiveFileTabId(null);
+    setRightPanelOpen(false);
+  }, []);
+
   // 设置下拉在点击外部时关闭
   useEffect(() => {
     if (!settingsOpen) return;
@@ -905,9 +912,13 @@ export function AppShell() {
           background: "var(--bg)",
         }}
       >
-        {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
-          <div style={{ flex: 1, overflow: "hidden" }}>
+        {/* Right panel tab bar.
+            Layout is plain flex: TabBar takes the remaining space, the
+            "close all" button is a fixed-width flex sibling (NOT absolutely
+            positioned) so it always renders inside the panel's visible area
+            and can never be clipped by overflow:hidden. */}
+        <div className="right-panel-tabbar" style={{ display: "flex", alignItems: "stretch", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36, width: "100%", minWidth: 0, boxSizing: "border-box" }}>
+          <div style={{ flex: "1 1 auto", overflow: "hidden", minWidth: 0 }}>
             <TabBar
               tabs={fileTabs}
               activeTabId={activeFileTabId ?? ""}
@@ -915,7 +926,40 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
-
+          {fileTabs.length > 0 && (
+            <button
+              onClick={handleCloseAllFileTabs}
+              title={`关闭全部预览标签(${fileTabs.length})`}
+              aria-label={`关闭全部预览标签(${fileTabs.length})`}
+              style={{
+                flex: "0 0 auto",
+                height: 36,
+                padding: "0 10px",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                border: "none",
+                borderLeft: "1px solid var(--border)",
+                /* leave 36px on the right so this button sits to the LEFT of
+                   the fixed top-right panel-toggle button (z-index 300) that
+                   would otherwise cover it. */
+                marginRight: 36,
+                background: "var(--bg-panel)",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-panel)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <line x1="6" y1="6" x2="18" y2="18" />
+                <line x1="18" y1="6" x2="6" y2="18" />
+              </svg>
+              <span style={{ flexShrink: 0 }}>全关</span>
+            </button>
+          )}
         </div>
 
         {/* File content */}

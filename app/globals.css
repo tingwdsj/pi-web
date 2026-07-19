@@ -588,6 +588,14 @@ span.linenumber {
     width: 42vw;
     min-width: 300px;
   }
+  /* The tab bar must follow the panel's actual width (100%) so the trailing
+     "close all" button sits inside the visible area. Override the fixed
+     42vw above. */
+  .right-panel-container > .right-panel-tabbar {
+    width: 100% !important;
+    min-width: 0 !important;
+    overflow: visible;
+  }
 }
 
 /* Mobile sidebar: slide in/out as overlay */

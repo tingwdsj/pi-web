@@ -12,8 +12,10 @@ import {
   isAudioPath,
   isDocumentPreviewPath,
   isImagePath,
+  isLegacyBinaryDocument,
 } from "@/lib/file-types";
 import { encodeFilePathForApi, getFileName, getRelativeFilePath } from "@/lib/file-paths";
+import { isDesktop, openFileLocally } from "@/lib/desktop-bridge";
 import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins } from "@/lib/markdown";
 
 interface Props {
@@ -70,6 +72,54 @@ function DownloadLink({ filePath, sourceSessionId }: { filePath: string; sourceS
         <line x1="12" y1="15" x2="12" y2="3" />
       </svg>
     </a>
+  );
+}
+
+// "Open locally" button — uses the OS default application via the desktop
+// bridge. Only meaningful in the desktop shell; rendered only when the bridge
+// is present (isDesktop()). In a plain browser it is hidden, per product spec.
+function OpenLocallyButton({ filePath }: { filePath: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!isDesktop()) return null;
+
+  return (
+    <button
+      onClick={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (busy) return;
+        setBusy(true);
+        setErr(null);
+        const r = await openFileLocally(filePath);
+        setBusy(false);
+        if (!r.ok && r.error !== "desktop-bridge-unavailable") {
+          setErr(r.error ?? "打开失败");
+          setTimeout(() => setErr(null), 4000);
+        }
+      }}
+      title={err ? err : "用本地默认程序打开"}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: 20,
+        padding: "0 5px",
+        background: err ? "rgba(248,113,113,0.12)" : "var(--bg-panel)",
+        border: "1px solid var(--border)",
+        borderRadius: 4,
+        color: err ? "#f87171" : "var(--text-muted)",
+        cursor: busy ? "wait" : "pointer",
+        flexShrink: 0,
+      }}
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+        <polyline points="15 3 21 3 21 9" />
+        <line x1="10" y1="14" x2="21" y2="3" />
+      </svg>
+    </button>
   );
 }
 
@@ -392,6 +442,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
           {watching ? "实时" : "静态"}
         </span>
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <OpenLocallyButton filePath={filePath} />
       </div>
       <div
         style={{
@@ -525,6 +576,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
           {watching ? "实时" : "静态"}
         </span>
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <OpenLocallyButton filePath={filePath} />
       </div>
       <div
         style={{
@@ -639,9 +691,12 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
         <span style={{ fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={filePath}>
           {getRelativeFilePath(filePath, cwd)}
         </span>
-        <span style={{ marginLeft: "auto" }}>{ext === "docx" ? "DOCX 预览" : "PDF"}</span>
+        <span style={{ marginLeft: "auto" }}>
+          {ext === "pdf" ? "PDF" : ext === "docx" ? "DOCX 预览" : ext.toUpperCase() + " 预览"}
+        </span>
         {size != null && <span>{formatSize(size)}</span>}
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <OpenLocallyButton filePath={filePath} />
         <span
           title={watching ? "实时同步中" : "未监听"}
           style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "#4ade80" : "var(--text-dim)", flexShrink: 0 }}
@@ -678,6 +733,66 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
+// Legacy binary Office formats (.doc/.xls/.ppt/...) have no reliable pure-JS
+// parser, so we deliberately do NOT render them as text (which produced the
+// garbled output). Instead show a friendly notice with a download button and,
+// in the desktop app, an "open locally" button that launches the OS default
+// (Word/Excel/...).
+function LegacyDocViewer({ filePath, cwd, sourceSessionId }: Props) {
+  const ext = getFileExt(filePath).toUpperCase();
+  const desktop = isDesktop();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "4px 16px",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 11,
+          color: "var(--text-dim)",
+          background: "var(--bg)",
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={filePath}>
+          {getRelativeFilePath(filePath, cwd)}
+        </span>
+        <span style={{ marginLeft: "auto" }}>{ext || "文档"}</span>
+        <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <OpenLocallyButton filePath={filePath} />
+      </div>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+          color: "var(--text-muted)",
+          fontSize: 13,
+          textAlign: "center",
+          background: "var(--bg-panel)",
+        }}
+      >
+        <div style={{ maxWidth: 420 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
+            此为老版二进制格式（{ext}），无法在浏览器内预览
+          </div>
+          <div style={{ lineHeight: 1.7 }}>
+            {desktop ? (
+              <>请点击右上角 <strong>“本地打开”</strong> 用系统默认程序（Word / Excel 等）查看，或 <strong>下载</strong> 后打开。</>
+            ) : (
+              <>请点击右上角 <strong>下载</strong>，用本地 Office 软件打开。（桌面版支持一键“本地打开”。）</>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function FileViewer({ filePath, cwd, sourceSessionId }: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
@@ -687,6 +802,9 @@ export function FileViewer({ filePath, cwd, sourceSessionId }: Props) {
   }
   if (isDocumentPreviewPath(filePath)) {
     return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+  }
+  if (isLegacyBinaryDocument(filePath)) {
+    return <LegacyDocViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
   return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
 }
@@ -941,6 +1059,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId }: Props) {
           </div>
         )}
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <OpenLocallyButton filePath={filePath} />
       </div>
 
       {/* Content area */}

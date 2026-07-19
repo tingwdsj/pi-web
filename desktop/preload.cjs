@@ -56,4 +56,10 @@ window.addEventListener(
 
 contextBridge.exposeInMainWorld("piDesktop", {
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
+  // Open a file with its OS default application (需求2).
+  openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
+  // Open a directory in the OS file manager (需求3).
+  openFolder: (dirPath) => ipcRenderer.invoke("open-folder", dirPath),
+  // Show the OS directory picker, return chosen path (项目目录下拉).
+  pickDirectory: () => ipcRenderer.invoke("pick-directory"),
 });

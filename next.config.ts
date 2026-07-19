@@ -24,9 +24,20 @@ const nextConfig: NextConfig = {
   // dependency edge into protected/irrelevant dirs under the user profile
   // (e.g. AppData\Local\Intel\...) and aborts the build. Those paths are never
   // real runtime dependencies — exclude the whole user-profile tree from
-  // tracing. (See desktop/win-eperm-patch.cjs for the matching fs guard.)
+  // tracing. Program Files is excluded for the same reason: nft has been seen
+  // following edges into WindowsApps (Bandisoft, PowerAutomate) which makes
+  // "Failed to copy traced files" drop the affected route's entire traced set
+  // (silently losing xlsx/adm-zip/mammoth). desktop/ensure-standalone-chunks.cjs
+  // backfills those regardless, but excluding here keeps the build clean.
+  // (See desktop/win-eperm-patch.cjs for the matching fs guard.)
   outputFileTracingExcludes: {
-    "*": ["C:\\Users\\**", "/Users/**", "/home/**"],
+    "*": [
+      "C:\\Users\\**",
+      "C:\\Program Files\\**",
+      "C:\\Program Files (x86)\\**",
+      "/Users/**",
+      "/home/**",
+    ],
   },
   allowedDevOrigins: ['192.168.*.*'],
   async headers() {

@@ -3,33 +3,7 @@
 [English](./README.md)
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
-
-## 快速开始
-
-**无需安装，直接运行：**
-
-```bash
-npx @agegr/pi-web@latest
-```
-
-**或全局安装后使用：**
-
-```bash
-npm install -g @agegr/pi-web
-pi-web
-```
-
-启动后打开 [http://localhost:30141](http://localhost:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。
-
-**可选参数：**
-
-```bash
-pi-web --port 8080              # 自定义端口
-pi-web --hostname 127.0.0.1     # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
-
-PORT=8080 pi-web                # 也支持环境变量
-```
+本项目是在@agegr原作者版本基础上进行UI/UX改造，并完成桌面端改造。原项目地址：[pi-web原作者版本](https://github.com/agegr/pi-web)
 
 ## 桌面版（Windows）
 
@@ -84,6 +58,17 @@ npm run desktop:build
 - **输入框提示**：placeholder 标注了 `Enter` 发送、`Shift+Enter` 换行；发送按钮只保留 icon（去掉了「发送」文字）。
 - **弹窗层级修复**：斜杠命令和 `@文件` 菜单改用 `position: fixed`，修复了欢迎界面下被顶部菜单栏遮挡的问题。
 - **worktree 切换器隐藏**：侧边栏的 Git worktree 切换器及「仅限 Git 仓库根目录」提示通过 `WORKTREE_UI_HIDDEN` 开关（`components/SessionSidebar.tsx`）在前端隐藏，底层逻辑保留——把开关改回 `false` 即可恢复显示。
+
+### 0.8.0 新增
+
+- **Excel 预览**：`.xlsx` / `.xlsm` 文件用 SheetJS（`xlsx`）转成表格 HTML 渲染，每个 sheet 一张表。
+- **旧版二进制文档提示**：旧版 `.doc` / `.xls` / `.ppt` / `.rtf` 等二进制格式不再当文本乱码显示，而是给出友好提示并引导「本地打开」（仅桌面端）。判断逻辑见 `lib/file-types.ts` 的 `isLegacyBinaryDocument`。
+- **本地打开**：文件预览的下载按钮旁新增「本地打开」按钮，用系统默认程序打开当前文件（桌面端专属，浏览器隐藏）。IPC 走 `piDesktop.openFile` → `shell.openPath`，带 UNC 路径和控制字符过滤。
+- **在资源管理器中打开**：文件树刷新按钮旁新增文件夹图标按钮，用系统资源管理器打开当前项目根目录（cwd）（桌面端专属，浏览器隐藏）。
+- **关闭全部预览标签**：文件预览 tab 栏右侧新增「✕ 全关」按钮，一次性关闭所有预览标签并收起右侧面板。
+- **技能 zip 上传**：「技能 → 添加」支持上传 skill zip 包：兼容 `SKILL.md` 在根目录或单个子目录两种结构，同名冲突时报错，并做了路径穿越 + zip bomb 防护（`lib/skill-zip.ts`，单文件 10 MB、总 50 MB、最多 2000 条目）。
+- **多文件上传 bug 修复**：输入框一次选多个文件时，之前只显示一个路径；现在所有路径都会正确插入。
+- **浏览本地文件夹**：项目目录下拉新增「浏览本地文件夹…」项，点击弹系统原生目录选择框选项目目录（桌面端专属；浏览器因安全限制拿不到真实磁盘路径，按钮隐藏，仍可用「自定义路径…」手动输入）。
 
 ## 注意事项
 

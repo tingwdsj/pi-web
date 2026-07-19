@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
+import { isDesktop, openFolderLocally, pickDirectory } from "@/lib/desktop-bridge";
 
 interface Props {
   selectedSessionId: string | null;
@@ -592,6 +593,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, []);
 
+  // Open the OS native directory picker (desktop only) and, on success, run
+  // the chosen path through the same /api/cwd/validate + setSelectedCwd flow
+  // as commitCustomPath — so file-access allow-listing and the downstream
+  // project-switch chain are reused verbatim. The dropdown action button is
+  // rendered only when isDesktop(), so this never runs in a plain browser.
+  const handlePickDirectory = useCallback(async () => {
+    const r = await pickDirectory();
+    // User dismissed the picker — leave the current selection untouched.
+    if (!r.ok || !r.path) return;
+    const pickedPath = r.path;
+    setCustomPathValidating(true);
+    setCustomPathError(null);
+    try {
+      const res = await fetch("/api/cwd/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: pickedPath }),
+      });
+      const data = await res.json().catch(() => ({})) as { cwd?: string; error?: string };
+      if (!res.ok || data.error) {
+        setCustomPathError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setSelectedCwd(data.cwd ?? pickedPath);
+      setCustomPathOpen(false);
+      setCustomPathValue("");
+      setDropdownOpen(false);
+    } catch (e) {
+      setCustomPathError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCustomPathValidating(false);
+    }
+  }, []);
+
   const handleCreateWorktree = useCallback(async () => {
     const branch = wtNewBranch.trim();
     if (!branch || wtBusy || !worktreeState) return;
@@ -994,6 +1029,37 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <path d="M1 3A1 1 0 0 1 2 2H4L5 3.5H8.5a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 1 8V3Z" />
                   </svg>
                   <span>使用默认目录</span>
+                </button>
+              )}
+
+              {/* Browse local folder via OS native picker — desktop only.
+                  Browsers can't read a real disk path from a picker, so the
+                  entry is hidden when the desktop bridge is absent (Web users
+                  use the "自定义路径…" manual entry below). */}
+              {!customPathOpen && isDesktop() && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handlePickDirectory(); }}
+                  disabled={customPathValidating}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    cursor: customPathValidating ? "wait" : "pointer",
+                    textAlign: "left",
+                    fontSize: 11,
+                    opacity: customPathValidating ? 0.6 : 1,
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M2 4a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V6" />
+                    <path d="M2 6h12l-1.2 6.2a1 1 0 0 1-1 .8H3.2a1 1 0 0 1-1-.8L2 6Z" />
+                  </svg>
+                  <span>{customPathValidating ? "校验中…" : "浏览本地文件夹…"}</span>
                 </button>
               )}
 
@@ -1539,6 +1605,38 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 </svg>
               )}
             </button>
+            {/* Open current project folder in the OS file manager. Desktop-only;
+                hidden in a plain browser (no shell access). */}
+            {isDesktop() && (selectedCwd ?? selectedCwdProp) && (
+              <button
+                onClick={async () => {
+                  const dir = selectedCwd ?? selectedCwdProp!;
+                  if (!dir) return;
+                  const r = await openFolderLocally(dir);
+                  if (!r.ok && r.error !== "desktop-bridge-unavailable") {
+                    // best-effort: no persistent error UI in this tight toolbar
+                    console.error("[pi-web] open folder failed:", r.error);
+                  }
+                }}
+                title={`在资源管理器中打开：${selectedCwd ?? selectedCwdProp}`}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 26, height: 26, padding: 0, marginRight: 6,
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  borderRadius: 5,
+                  flexShrink: 0,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+            )}
           </div>
           {explorerOpen && (
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type DragEvent } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SkillSearchResult } from "@/lib/api-types";
 
@@ -260,6 +260,54 @@ function AddSkillPanel({
       ? "~/.pi/agent/skills/"
       : `${shortenPath(cwd)}/.pi/agent/skills/`;
 
+  // ── Upload zip install ──
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipError, setZipError] = useState<string | null>(null);
+  const [zipDone, setZipDone] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadZip = useCallback(
+    async (file: File) => {
+      setZipBusy(true);
+      setZipError(null);
+      setZipDone(null);
+      try {
+        const form = new FormData();
+        form.set("scope", scope);
+        form.set("file", file);
+        if (scope === "project") form.set("cwd", cwd);
+        const res = await fetch("/api/skills/upload", { method: "POST", body: form });
+        const d = (await res.json()) as {
+          success?: boolean;
+          name?: string;
+          error?: string;
+        };
+        if (!res.ok || d.error) {
+          setZipError(d.error ?? `HTTP ${res.status}`);
+          return;
+        }
+        setZipDone(`已安装技能:${d.name ?? "(未知)"}`);
+        onInstalled();
+      } catch (e) {
+        setZipError(String(e));
+      } finally {
+        setZipBusy(false);
+      }
+    },
+    [scope, cwd, onInstalled],
+  );
+
+  const onDropZip = useCallback(
+    (e: DragEvent) => {
+      e.preventDefault();
+      const f = Array.from(e.dataTransfer.files).find((x) =>
+        x.name.toLowerCase().endsWith(".zip"),
+      );
+      if (f) uploadZip(f);
+    },
+    [uploadZip],
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* ── Header area ── */}
@@ -372,6 +420,69 @@ function AddSkillPanel({
           </div>
         )}
       </div>
+
+      {/* ── Upload zip ── */}
+      <div
+        onDrop={onDropZip}
+        onDragOver={(e) => e.preventDefault()}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 16,
+          padding: "10px 12px",
+          border: "1px dashed var(--border)",
+          borderRadius: 6,
+          background: "var(--bg-panel)",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <span style={{ fontSize: 12, color: "var(--text-muted)", flex: 1 }}>
+          拖入技能 zip 包，或
+        </span>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) uploadZip(f);
+            e.target.value = "";
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={zipBusy}
+          style={{
+            padding: "5px 14px",
+            fontSize: 12,
+            fontWeight: 500,
+            borderRadius: 5,
+            border: "1px solid var(--border)",
+            cursor: zipBusy ? "not-allowed" : "pointer",
+            background: "none",
+            color: zipBusy ? "var(--text-dim)" : "var(--text-muted)",
+            flexShrink: 0,
+          }}
+        >
+          {zipBusy ? "安装中…" : "选择 zip"}
+        </button>
+        {zipDone && (
+          <span style={{ fontSize: 12, color: "#16a34a", flexShrink: 0 }}>
+            ✓ {zipDone}
+          </span>
+        )}
+      </div>
+      {zipError && (
+        <div style={{ fontSize: 12, color: "#f87171", marginBottom: 12, wordBreak: "break-word" }}>
+          {zipError}
+        </div>
+      )}
 
       {/* ── Results list ── */}
       {results.length > 0 ? (

@@ -91,6 +91,18 @@ npm run desktop:dev      # cross-env PI_DESKTOP_DEV=1 electron desktop/main.cjs
 
 dev 模式下 `main.cjs` 会 spawn `next dev`（固定端口 30141）而不是 standalone server，并跳过 Node 22 运行时（用 dev 环境的 Node）。
 
+> **注意（dev 模式的局限）**：dev 模式下 `next dev` 跑在 **Electron 内置的 Node 20.18** 里。pi SDK 自带的 `undici` 要求更新版 Node，会触发 `webidl.util.markAsUncloneable is not a function`，导致加载会话时崩。**dev 模式只适合纯前端 UI 调试**；涉及 pi SDK 服务端路径（发消息、跑 agent、xlsx 预览、技能 zip 上传）必须在**完整打包**（`npm run desktop:build`，用 Node 22 运行时）后实测。
+
+### 已知打包坑：第三方依赖（xlsx / adm-zip / mammoth）漏进 standalone
+
+**现象**：`next build` 时 `@vercel/nft` 文件追踪器在本机会跟随依赖边追踪到系统目录（`C:\Program Files\WindowsApps\` 下的 Bandisoft、PowerAutomate，以及 `~/.Neo4jDesktop`），触发一串 `⚠ Failed to copy traced files`，**导致受影响路由的整个 traced 依赖集都没复制进 `.next/standalone`**——连带把 `xlsx`、`adm-zip`、甚至早已在用的 `mammoth` 都漏掉了。打包不报错，但用户机器上会运行时报 `Cannot find module 'xlsx'`（xlsx 预览、技能 zip 上传、docx 预览全挂）。
+
+**修复**（已在代码里）：
+1. `next.config.ts` 的 `outputFileTracingExcludes` 把 `C:\Program Files\**` 和 `(x86)` 也排除，从源头减少无效追踪。
+2. `desktop/ensure-standalone-chunks.cjs` 新增 `syncThirdPartyDeps()`：不依赖 nft，**主动从源 `node_modules` 把 `xlsx` / `adm-zip` / `mammoth` 整包复制进 standalone**，最后断言这三个包都在——缺了就 `exitCode = 1` 让构建失败（而非让 bug 溜到用户端）。
+
+**验证**：构建日志里应看到 `third-party deps backfilled: xlsx (26), adm-zip (19), mammoth (144)` 和 `third-party deps present in standalone: ...`。如果出现 `STILL missing` 警告，说明回填失败，构建会终止——不要忽略。
+
 ---
 
 ## 3. 各文件职责
