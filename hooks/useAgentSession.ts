@@ -348,11 +348,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const newSessionPromotedRef = useRef(false);
   const promptRunIdRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
+  // Guards auto-naming so we only fire one summarize request per session.
+  const autoNameRequestedRef = useRef<string | null>(null);
+  // Mirror of currentModel for use inside stable callbacks (agent_end).
+  const currentModelRef = useRef<SelectedModel | null>(null);
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
+
+  useEffect(() => {
+    currentModelRef.current = currentModel;
+  }, [currentModel]);
+
+  useEffect(() => {
+    // Reset the auto-name guard when the active session changes — a freshly
+    // switched-to session hasn't been auto-named in this hook instance yet.
+    autoNameRequestedRef.current = null;
+  }, [session?.id]);
 
   const sessionStats = (() => {
     if (sessionStatsOverride) return sessionStatsOverride;
@@ -795,6 +809,35 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
 
+  // Fire-and-forget: ask the backend to summarize a <=20-char title from the
+  // first round and write it back. Silent on every failure (the backend is
+  // the source of truth for "already named / not first round"). On success we
+  // bump the agent-end refresh so the sidebar re-reads the new name.
+  const requestAutoName = useCallback((sid: string) => {
+    const model = currentModelRef.current;
+    if (!model) return;
+    // De-dupe within this hook instance for the same session.
+    if (autoNameRequestedRef.current === sid) return;
+    autoNameRequestedRef.current = sid;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}/auto-name`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: model.provider, modelId: model.modelId }),
+        });
+        if (!res.ok) return;
+        const data = await res.json() as { renamed?: boolean };
+        if (data.renamed) {
+          // Trigger the sidebar list refresh (same path as agent_end).
+          onAgentEnd?.();
+        }
+      } catch {
+        // Silent — never surface auto-name failures to the user.
+      }
+    })();
+  }, [onAgentEnd]);
+
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
@@ -828,6 +871,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             .catch(() => {});
         }
         onAgentEnd?.();
+        // After the first round of a brand-new session, auto-name it. The
+        // backend guards against non-first rounds and already-named sessions.
+        if (sessionIdRef.current) {
+          requestAutoName(sessionIdRef.current);
+        }
         break;
       case "prompt_done":
         if (!agentRunningRef.current) break;
@@ -942,7 +990,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         handleExtensionUiRequest(event as ExtensionUiRequest);
         break;
     }
-  }, [addNotice, finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd]);
+  }, [addNotice, finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd, requestAutoName]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string) => {

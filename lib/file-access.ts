@@ -1,8 +1,8 @@
-import { readdirSync } from "fs";
+import { readdirSync, existsSync } from "fs";
 import { homedir } from "os";
 import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
-import { listAllSessions } from "./session-reader";
+import { listAllSessions, getAgentDir } from "./session-reader";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 
 // Short-TTL cache for the allowed-roots set. Without this, every file list/read
@@ -46,6 +46,15 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   }
 
   for (const root of getAdditionalAllowedRoots()) roots.add(root);
+
+  // Skills referenced via /skill:NAME render as a preview link in the chat.
+  // Allow reading the user-level skills dir so the SKILL.md preview can load.
+  try {
+    const skillsDir = path.join(getAgentDir(), "skills");
+    if (existsSync(skillsDir)) roots.add(normalizeSlashes(skillsDir));
+  } catch {
+    // ignore if agent dir is unavailable
+  }
 
   globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
   return roots;

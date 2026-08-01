@@ -1,0 +1,23 @@
+# Exclude Next.js build cache and dev artifacts from the published tarball.
+# (The package.json "files" array uses "!..." which npm does not honor for
+# sub-paths; .npmignore is the correct mechanism for excluding these.)
+.next/cache
+.next/dev
+.next/standalone
+.next/**/*.js.map
+.next/trace
+.next/trace-build
+.next/diagnostics
+.next/types
+
+# Never publish these regardless of build
+node_modules
+.git
+.gitignore
+uploads
+dist-electron
+desktop
+docs
+tsconfig.tsbuildinfo
+*.log
+.env*

@@ -19,6 +19,23 @@ import type {
   ThinkingContent,
 } from "@/lib/types";
 
+/**
+ * Parse a server-expanded <skill>...</skill> block from a user message.
+ * Mirrors the SDK's parseSkillBlock (agent-session.ts), re-implemented locally
+ * so the client bundle never pulls the pi-coding-agent Node entry (which
+ * references child_process etc.). Returns null when the text isn't a skill block.
+ */
+function parseSkillBlock(text: string): { name: string; location: string; content: string; userMessage?: string } | null {
+  const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
+  if (!match) return null;
+  return {
+    name: match[1],
+    location: match[2],
+    content: match[3],
+    userMessage: match[4]?.trim() || undefined,
+  };
+}
+
 interface Props {
   message: AgentMessage;
   isStreaming?: boolean;
@@ -96,6 +113,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       ? []
       : message.content.filter((b): b is ImageContent => b.type === "image");
 
+  // A user message carrying a `/skill:` invocation is expanded server-side
+  // into a <skill>...</skill> block (full SKILL.md text) before being written
+  // to the session file. Collapse it into a compact "skill:NAME" link that
+  // opens the SKILL.md preview in the right drawer (via MarkdownBody's link
+  // handler → onOpenFile), and render any user text after the block normally.
+  // The agent still receives the full skill text — this is display-only.
+  const parsedSkill = useMemo(() => parseSkillBlock(content), [content]);
+
   const time = formatTime(message.timestamp);
   const canFork = !!entryId && !!onFork;
   const canNavigate = !!prevAssistantEntryId && !!onNavigate;
@@ -153,7 +178,18 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               })}
             </div>
           )}
-          {content && <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>}
+          {parsedSkill ? (
+            <SkillInvocationDisplay
+              name={parsedSkill.name}
+              location={parsedSkill.location}
+              skillContent={parsedSkill.content}
+              userMessage={parsedSkill.userMessage}
+              cwd={cwd}
+              onOpenFile={onOpenFile}
+            />
+          ) : (
+            content && <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>
+          )}
         </div>
 
       </div>
@@ -266,6 +302,144 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Compact rendering for a user message that invoked a skill (`/skill:NAME`).
+ * The server expands the SKILL.md into a <skill> block; here we collapse it
+ * back to a "skill:NAME" link that opens the SKILL.md in the preview drawer,
+ * with an optional expand to view the embedded skill text inline.
+ */
+function SkillInvocationDisplay({
+  name,
+  location,
+  skillContent,
+  userMessage,
+  cwd,
+  onOpenFile,
+}: {
+  name: string;
+  location: string;
+  skillContent: string;
+  userMessage?: string;
+  cwd?: string;
+  onOpenFile?: (filePath: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const handleOpen = () => {
+    // location is the absolute SKILL.md path written by the server into the
+    // <skill> block. Normalize backslashes so it matches the encoding used by
+    // @file links, then open it in the right preview drawer.
+    onOpenFile?.(location.replace(/\\/g, "/"));
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          borderRadius: 7,
+          overflow: "hidden",
+          fontSize: 13,
+          border: "1px solid var(--border)",
+          background: "var(--bg-subtle)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px" }}>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--text-dim)",
+              flexShrink: 0,
+            }}
+          >
+            技能
+          </span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            {onOpenFile ? (
+              <button
+                onClick={handleOpen}
+                title={location}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  margin: 0,
+                  color: "var(--accent)",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  textDecoration: "underline",
+                  textUnderlineOffset: "2px",
+                  maxWidth: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {name}
+              </button>
+            ) : (
+              <span style={{ color: "var(--text)", fontWeight: 500 }}>{name}</span>
+            )}
+          </div>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "收起技能内容" : "展开技能内容"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "2px 4px",
+              background: "none",
+              border: "none",
+              color: "var(--text-dim)",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
+            >
+              <polyline points="2 3.5 5 6.5 8 3.5" />
+            </svg>
+          </button>
+        </div>
+        {expanded && (
+          <pre
+            style={{
+              margin: 0,
+              padding: "8px 10px",
+              borderTop: "1px solid var(--border)",
+              color: "var(--text-muted)",
+              fontSize: 12,
+              lineHeight: 1.5,
+              maxHeight: 360,
+              overflow: "auto",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {skillContent}
+          </pre>
+        )}
+      </div>
+      {userMessage && (
+        <div style={{ marginTop: 6 }}>
+          <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{userMessage}</MarkdownBody>
+        </div>
+      )}
+    </>
   );
 }
 

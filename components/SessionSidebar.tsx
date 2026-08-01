@@ -1825,19 +1825,38 @@ function SessionItem({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
 
-  // 会话操作菜单（重命名 / 导出 / 删除）—— 点击外部时关闭
+  // 会话操作菜单（重命名 / 导出 / 删除）—— 点击外部 / 滚动 / 缩放时关闭。
+  // 菜单用 position:fixed（见渲染处）以逃出 session 列表滚动容器的裁切，
+  // 因此滚动时不能跟着移动（会漂移），干脆关闭更自然。
   useEffect(() => {
     if (!menuOpen) return;
+    const measure = () => {
+      const el = menuTriggerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    };
+    measure();
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const closeOnScroll = () => setMenuOpen(false);
+    window.addEventListener("resize", closeOnScroll);
+    // 滚动可能来自列表容器或任意祖先；用 capture 阶段兜住。
+    window.addEventListener("scroll", closeOnScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("resize", closeOnScroll);
+      window.removeEventListener("scroll", closeOnScroll, true);
+    };
   }, [menuOpen]);
 
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
@@ -2072,6 +2091,7 @@ function SessionItem({
           {(hovered || menuOpen) && (
             <div ref={menuRef} style={{ position: "relative", display: "flex", gap: 4, flexShrink: 0 }}>
               <button
+                ref={menuTriggerRef}
                 onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
                 title="更多操作"
                 aria-label="更多操作"
@@ -2102,14 +2122,14 @@ function SessionItem({
                   <circle cx="3" cy="8" r="1.5" /><circle cx="8" cy="8" r="1.5" /><circle cx="13" cy="8" r="1.5" />
                 </svg>
               </button>
-              {menuOpen && (
+              {menuOpen && menuPos && (
                 <div
                   role="menu"
                   style={{
-                    position: "absolute",
-                    right: 0,
-                    top: "calc(100% + 4px)",
-                    zIndex: 120,
+                    position: "fixed",
+                    top: menuPos.top,
+                    right: menuPos.right,
+                    zIndex: 500,
                     minWidth: 128,
                     background: "var(--bg)",
                     border: "1px solid var(--border)",

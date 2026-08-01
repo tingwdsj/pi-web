@@ -1,5 +1,5 @@
 {
-  "name": "@agegr/pi-web",
+  "name": "@tingwdsj/pi-web",
   "version": "0.8.0",
   "description": "Web UI for the pi coding agent",
   "homepage": "https://github.com/agegr/pi-web#readme",
@@ -17,13 +17,16 @@
   },
   "files": [
     "bin",
-    ".next",
-    "!.next/cache",
-    "!.next/dev",
-    "!.next/**/*.js.map",
     "public",
     "next.config.ts",
-    "package.json"
+    "package.json",
+    ".next/BUILD_ID",
+    ".next/*.json",
+    ".next/*.js",
+    ".next/server",
+    ".next/static",
+    "!.next/**/*.js.map",
+    "!.next/**/*.nft.json"
   ],
   "scripts": {
     "dev": "next dev -p 30141",

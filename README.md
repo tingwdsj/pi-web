@@ -73,6 +73,8 @@ This fork keeps all upstream features and adds the following changes:
 - **Skill zip upload**: "Skills → Add" accepts a skill zip — supports `SKILL.md` at the archive root or inside a single subdir, errors on name conflict, and includes path-traversal + zip-bomb protection (`lib/skill-zip.ts`: 10 MB/file, 50 MB total, 2000 entries max).
 - **Multi-file upload fix**: selecting multiple files in the input box used to show only one path; all paths are now inserted correctly.
 - **Browse local folder**: the project-directory dropdown has a new "Browse local folder…" entry that opens the OS native directory picker (desktop only; browsers can't read a real disk path from a picker so the button is hidden — the manual "Custom path…" entry still works).
+- **Auto session naming**: after the first round of a brand-new session (your message + the AI reply), the current model summarizes a title of 20 chars or fewer and updates the sidebar list. Sessions you've renamed or that already have a title are never overwritten; if summarization fails, the title is left unchanged (silent, no error).
+- **Compact skill display**: a skill invoked in a user message (`/skill:XXX`) no longer renders the entire SKILL.md inline — it collapses into a `skill:XXX` link that opens the full SKILL.md in the preview drawer (and can be expanded inline). The full skill text is still sent to the agent, so nothing functional changes.
 
 ## Notes
 
