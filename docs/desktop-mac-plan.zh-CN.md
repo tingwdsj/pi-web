@@ -1,6 +1,8 @@
-# Mac 桌面版改造规划（设计文档，未实施）
+# Mac 桌面版改造规划（设计文档 · 已实施）
 
-本文档是 Pi Agent **Mac 版**的改造规划。**目前尚未动手**，是给你审阅的方案。Windows 版已完成并发布（`Pi Agent Setup 0.8.0.exe`），Mac 版沿用同一套「Electron 外壳 + Next standalone 服务 + 内置 Node 22 运行时」架构，**不需要重新设计，只需把若干 Windows 特化点换成 Mac 版**。
+> **状态：已实施（2026-09）。** 实际改造已完成并成功产出 arm64 + x64 两个 dmg；施工细节、实际踩到的新坑（npm 12 的 `allow-remote` / install-scripts、`/Users/**` 追踪排除地雷、arm64 ad-hoc 签名）见 **[`desktop-build-mac.zh-CN.md`](./desktop-build-mac.zh-CN.md)**。本文保留作背景与决策记录。
+
+本文档是 Pi Agent **Mac 版**的改造规划。Windows 版已完成并发布（`Pi Agent Setup 0.8.0.exe`），Mac 版沿用同一套「Electron 外壳 + Next standalone 服务 + 内置 Node 22 运行时」架构，**不需要重新设计，只需把若干 Windows 特化点换成 Mac 版**。
 
 > 配套阅读：Windows 版的完整踩坑记录见 [`desktop-build.zh-CN.md`](./desktop-build.zh-CN.md)。
 
@@ -58,7 +60,9 @@
 | `desktop/lib/spawn.cjs`          | `buildServerEnv` 环境变量白名单补 Mac 变量；nodePath 注释更新                                                              | ⚠️ 小（killTree 已跨平台） |
 | `desktop/icon.ico` → `icon.icns` | 生成 Mac 多分辨率图标                                                                                               | ⚠️ 小                |
 
-**不用动的文件**（已确认平台无关）：`lib/port.cjs`、`lib/seed.cjs`、`preload.cjs`、`ensure-standalone-chunks.cjs`、`next.config.ts`（其 `outputFileTracingExcludes` 已含 Mac 路径）。
+**不用动的文件**（已确认平台无关）：`lib/port.cjs`、`lib/seed.cjs`、`preload.cjs`、`ensure-standalone-chunks.cjs`。
+
+> ⚠️ **勘误**：本节原来把 `next.config.ts` 列为「不用动」，并称其 `outputFileTracingExcludes` 已含 Mac 路径。实测这是个地雷：其中的 `/Users/**` 会被 Next 用 `contains` 匹配**绝对路径**，而项目就在 `/Users/<你>/...` 下，导致整个项目的依赖被排除出 standalone。实际实施时已改为**按平台构造**排除列表（POSIX 不设绝对路径排除）。详见 [`desktop-build-mac.zh-CN.md` 坑 M3](./desktop-build-mac.zh-CN.md)。
 
 ---
 

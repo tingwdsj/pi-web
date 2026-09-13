@@ -38,7 +38,8 @@
     "desktop:dev": "cross-env PI_DESKTOP_DEV=1 electron desktop/main.cjs",
     "desktop:build:next": "cross-env NODE_OPTIONS=\"--require ./desktop/win-eperm-patch.cjs\" next build --webpack",
     "desktop:fetch-node": "node desktop/fetch-node.cjs",
-    "desktop:build": "node desktop/fetch-node.cjs && npm run desktop:build:next && node desktop/ensure-standalone-chunks.cjs && electron-builder --config desktop/electron-builder.yml"
+    "desktop:build": "node desktop/fetch-node.cjs && npm run desktop:build:next && node desktop/ensure-standalone-chunks.cjs && electron-builder --config desktop/electron-builder.yml",
+    "desktop:build:mac": "npm run desktop:build -- --mac"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.80.3",
@@ -75,5 +76,13 @@
     "postcss": "^8",
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "sharp@0.34.5": true,
+    "protobufjs@7.6.4": true,
+    "protobufjs@7.6.1": true,
+    "unrs-resolver@1.11.1": true,
+    "@google/genai@1.52.0": true
   }
 }

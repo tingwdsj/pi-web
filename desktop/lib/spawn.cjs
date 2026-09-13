@@ -10,6 +10,7 @@
 
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const http = require("http");
 
@@ -49,12 +50,17 @@ function waitForReady(port, timeoutMs = 15000) {
 // dir with the main process / seed). NODE_ENV/PORT/HOSTNAME are set explicitly.
 function buildServerEnv() {
   const allow = new Set([
-    // OS / shell / path resolution
+    // OS / shell / path resolution (Windows)
     "PATH", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "windir",
     "COMSPEC", "ComSpec", "APPDATA", "AppData", "LOCALAPPDATA", "LocalAppData",
     "PROGRAMDATA", "ProgramData", "PROGRAMFILES", "ProgramFiles",
     "PROGRAMFILES(X86)", "ProgramFiles(x86)", "USERPROFILE", "USERDOMAIN",
     "USERNAME", "COMPUTERNAME", "HOMEDRIVE", "HOMEPATH",
+    // OS / shell / path resolution (macOS / Linux). HOME is essential: pi
+    // resolves ~/.pi/agent from it, and a Finder-launched app does not always
+    // inherit the same environment a terminal shell would.
+    "HOME", "SHELL", "USER", "LOGNAME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+    "__CF_USER_TEXT_ENCODING",
     // Temp dirs (Next/pi may write here)
     "TEMP", "TMP", "TMPDIR",
     // Locale
@@ -63,22 +69,50 @@ function buildServerEnv() {
     "PI_CODING_AGENT_DIR",
     // Proxy (user may need it for outbound LLM calls; harmless if absent)
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    // Git-over-SSH (worktree/push helpers may need the agent socket)
+    "SSH_AUTH_SOCK",
   ]);
   const env = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (allow.has(k)) env[k] = v;
   }
   env.NODE_ENV = "production";
+
+  // macOS apps launched from Finder inherit launchd's minimal PATH
+  // (/usr/bin:/bin:/usr/sbin:/sbin), which lacks Homebrew and user-local bin
+  // dirs. pi shells out to git / npm / npx (worktrees, skills, plugins), so
+  // append the usual locations that actually exist.
+  if (process.platform === "darwin") {
+    const candidates = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"];
+    try {
+      candidates.push(path.join(os.homedir(), ".local", "bin"));
+    } catch {
+      /* homedir unavailable — skip */
+    }
+    const current = env.PATH ? env.PATH.split(":") : [];
+    const have = new Set(current);
+    for (const dir of candidates) {
+      if (have.has(dir)) continue;
+      try {
+        if (fs.statSync(dir).isDirectory()) current.push(dir);
+      } catch {
+        /* not present — skip */
+      }
+    }
+    env.PATH = current.join(":");
+  }
+
   return env;
 }
 
 // appDir = directory containing the standalone server.js (i.e. .next/standalone
 // in dev, or process.resourcesPath/app/server in the packaged app).
 // nodePath = optional path to a real node executable. In the packaged app we
-// ship Node 22 at resources/node/node.exe and use it to run server.js, because
-// Electron 33's embedded Node 20.18 is too old for Next 16.2.9's edge-runtime
-// (see electron-builder.yml comment). In dev we fall back to process.execPath
-// (the dev electron or a system node) with ELECTRON_RUN_AS_NODE.
+// ship Node 22 at resources/node/node.exe (Windows) or resources/node/node
+// (macOS) and use it to run server.js, because Electron 33's embedded Node 20.18
+// is too old for Next 16.2.9's edge-runtime (see electron-builder.yml comment).
+// In dev we fall back to process.execPath (the dev electron or a system node)
+// with ELECTRON_RUN_AS_NODE.
 function startNextServer(appDir, port, nodePath) {
   const serverJs = path.join(appDir, "server.js");
   if (!fs.existsSync(serverJs)) {

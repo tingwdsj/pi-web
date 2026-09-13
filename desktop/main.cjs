@@ -29,6 +29,12 @@ const DEV_PORT = 30141;
 
 let mainWindow = null;
 let nextChild = null;
+// Last-known app URL, so the macOS "activate" handler can reopen a window
+// against the still-running server after the user closed the last window.
+let currentPort = null;
+let currentServerReady = false;
+// The default session is shared by all windows; attach will-download once.
+let downloadHandlerAttached = false;
 
 function log(msg) {
   console.log(`[pi-desktop] ${msg}`);
@@ -115,6 +121,11 @@ ipcMain.handle("pick-directory", async () => {
 function loadErrorPage(win, port, detail) {
   const safeDetail = String(detail).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const appUrl = `http://127.0.0.1:${port}/`;
+  const isMac = process.platform === "darwin";
+  const runtimePath = isMac ? "Resources/node/node" : "resources\\node\\node.exe";
+  const hints = isMac
+    ? `如果反复出现:① 确认应用已放入「应用程序」且 <code>${runtimePath}</code> 有可执行权限(<code>chmod +x</code>);② 若提示“已损坏”,先执行 <code>xattr -rd com.apple.quarantine /Applications/Pi\\ Agent.app</code>;③ 关闭其他占用资源的程序后重启 Pi Agent;④ 重新安装。`
+    : `如果反复出现:① 确认安装目录未被杀毒软件隔离(尤其 <code>${runtimePath}</code>);② 关闭其他占用资源的程序后重启 Pi Agent;③ 重新安装。`;
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pi Agent — 启动失败</title>
 <style>
   body{font-family:-apple-system,Segoe UI,sans-serif;background:#0a0a0a;color:#e5e5e5;margin:0;padding:48px 24px;display:flex;justify-content:center}
@@ -128,13 +139,124 @@ function loadErrorPage(win, port, detail) {
   .hint{font-size:12px;color:#666;margin-top:24px}
 </style></head><body><div class="card">
 <h1>Pi Agent 无法启动内置服务</h1>
-<p>Pi Agent 需要启动一个本地服务来加载界面,但它没有在限定时间内就绪。这通常是暂时的(首次启动较慢,或杀毒软件正在扫描)。</p>
+<p>Pi Agent 需要启动一个本地服务来加载界面,但它没有在限定时间内就绪。这通常是暂时的(首次启动较慢${isMac ? "" : ",或杀毒软件正在扫描"})。</p>
 <div class="detail">${safeDetail}</div>
 <button onclick="location.href='${appUrl}'">重试加载</button>
 <button onclick="location.reload()">刷新本页</button>
-<p class="hint">如果反复出现:① 确认安装目录未被杀毒软件隔离(尤其 <code>resources\\node\\node.exe</code>);② 关闭其他占用资源的程序后重启 Pi Agent;③ 重新安装。</p>
+<p class="hint">${hints}</p>
 </div></body></html>`;
   win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+}
+
+// Install the application menu.
+//   - macOS keeps a menu built from standard roles: setting it to null also
+//     removes the Edit menu, which is what provides Cmd+C / Cmd+V / Cmd+X /
+//     Cmd+A and Cmd+Q / Cmd+W. Without it, text editing in the chat box breaks.
+//   - Windows/Linux keep the bar hidden (autoHideMenuBar) and menu removed.
+function installApplicationMenu() {
+  if (process.platform === "darwin") {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: "appMenu" },
+        { role: "editMenu" },
+        { role: "viewMenu" },
+        { role: "windowMenu" },
+      ])
+    );
+  } else {
+    Menu.setApplicationMenu(null);
+  }
+}
+
+// Create the main window and wire up its per-window handlers. Shared by
+// bootstrap() and the macOS "activate" handler (dock-icon click after the last
+// window was closed — the Next server stays alive, so we just open a new
+// window against the same port).
+async function openMainWindow(port, serverReady) {
+  installApplicationMenu();
+
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 840,
+    minWidth: 900,
+    minHeight: 600,
+    title: "Pi Agent",
+    // .icns on macOS, .ico on Windows. Both are flattened to the app root by
+    // the electron-builder `files` FileSet (see electron-builder.yml).
+    icon: path.join(__dirname, process.platform === "darwin" ? "icon.icns" : "icon.ico"),
+    autoHideMenuBar: true,
+    backgroundColor: "#0a0a0a",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  mainWindow = win;
+
+  // Open external links in the system browser; keep localhost in-app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("http://127.0.0.1:") || url.startsWith("http://localhost:")) {
+      return { action: "allow" };
+    }
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  // 接管文件下载（会话 HTML 导出走 <a download>，触发 will-download）。
+  // 不接管时 Electron 的默认下载行为在部分环境下会出现：保存对话框弹出、
+  // 用户选目录点保存后文件却不落地（下载项被中断/取消，且无任何提示）。
+  // 这里显式弹出保存对话框并把用户选择的路径设为保存目标，同时打日志
+  // 便于诊断；若用户取消则主动取消下载项，避免残留。
+  //
+  // Attached once per session: all windows share Electron's default session,
+  // so re-adding on every new window would fire the dialog N times.
+  if (!downloadHandlerAttached) {
+    downloadHandlerAttached = true;
+    win.webContents.session.on("will-download", (_event, item) => {
+      const suggested = item.getFilename() || "download.html";
+      log(`[download] will-download: suggested="${suggested}" mime="${item.getMimeType()}" url="${item.getURL()}"`);
+
+      const chosen = dialog.showSaveDialogSync(mainWindow, {
+        title: "保存导出文件",
+        defaultPath: suggested,
+      });
+
+      if (!chosen) {
+        log(`[download] user cancelled save dialog`);
+        item.cancel();
+        return;
+      }
+
+      log(`[download] save path = ${chosen}`);
+      item.setSavePath(chosen);
+
+      item.on("done", (_e, state) => {
+        log(`[download] done state="${state}" path="${item.getSavePath()}"`);
+      });
+      item.on("updated", (_e, state) => {
+        log(`[download] updated state="${state}"`);
+      });
+    });
+  }
+
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+
+  if (serverReady) {
+    try {
+      await win.loadURL(`http://127.0.0.1:${port}/`);
+    } catch (e) {
+      console.error("[pi-desktop] loadURL failed:", e.message);
+      loadErrorPage(win, port, e.message);
+    }
+  } else {
+    // Server never came up — show a diagnostic page instead of a blank window
+    // (which would otherwise throw an unhandled ERR_CONNECTION_REFUSED).
+    loadErrorPage(win, port, "Server did not become ready within the timeout.");
+  }
+  return win;
 }
 
 async function bootstrap() {
@@ -174,10 +296,12 @@ async function bootstrap() {
     nextChild.stderr.on("data", (d) => process.stderr.write(`[next] ${d}`));
   } else {
     const appDir = path.join(process.resourcesPath, "server");
-    // Use the shipped Node 22 runtime (resources/node/node.exe) to run the
-    // standalone server — Electron 33's embedded Node 20.18 is too old for
-    // Next 16.2.9's edge-runtime (markAsUncloneable). See spawn.cjs.
-    const nodePath = path.join(process.resourcesPath, "node", "node.exe");
+    // Use the shipped Node 22 runtime (resources/node/node.exe on Windows,
+    // resources/node/node on macOS) to run the standalone server — Electron
+    // 33's embedded Node 20.18 is too old for Next 16.2.9's edge-runtime
+    // (markAsUncloneable). See spawn.cjs and electron-builder.yml.
+    const nodeBinary = process.platform === "win32" ? "node.exe" : "node";
+    const nodePath = path.join(process.resourcesPath, "node", nodeBinary);
     try {
       nextChild = startNextServer(appDir, port, nodePath);
     } catch (e) {
@@ -202,79 +326,9 @@ async function bootstrap() {
   }
 
   // 5. Open the window.
-  Menu.setApplicationMenu(null);
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    minWidth: 900,
-    minHeight: 600,
-    title: "Pi Agent",
-    icon: path.join(__dirname, "icon.ico"),
-    autoHideMenuBar: true,
-    backgroundColor: "#0a0a0a",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  if (serverReady) {
-    try {
-      await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
-    } catch (e) {
-      console.error("[pi-desktop] loadURL failed:", e.message);
-      loadErrorPage(mainWindow, port, e.message);
-    }
-  } else {
-    // Server never came up — show a diagnostic page instead of a blank window
-    // (which would otherwise throw an unhandled ERR_CONNECTION_REFUSED).
-    loadErrorPage(mainWindow, port, "Server did not become ready within the timeout.");
-  }
-
-  // Open external links in the system browser; keep localhost in-app.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://127.0.0.1:") || url.startsWith("http://localhost:")) {
-      return { action: "allow" };
-    }
-    shell.openExternal(url);
-    return { action: "deny" };
-  });
-
-  // 接管文件下载（会话 HTML 导出走 <a download>，触发 will-download）。
-  // 不接管时 Electron 的默认下载行为在部分环境下会出现：保存对话框弹出、
-  // 用户选目录点保存后文件却不落地（下载项被中断/取消，且无任何提示）。
-  // 这里显式弹出保存对话框并把用户选择的路径设为保存目标，同时打日志
-  // 便于诊断；若用户取消则主动取消下载项，避免残留。
-  mainWindow.webContents.session.on("will-download", (_event, item) => {
-    const suggested = item.getFilename() || "download.html";
-    log(`[download] will-download: suggested="${suggested}" mime="${item.getMimeType()}" url="${item.getURL()}"`);
-
-    const chosen = dialog.showSaveDialogSync(mainWindow, {
-      title: "保存导出文件",
-      defaultPath: suggested,
-    });
-
-    if (!chosen) {
-      log(`[download] user cancelled save dialog`);
-      item.cancel();
-      return;
-    }
-
-    log(`[download] save path = ${chosen}`);
-    item.setSavePath(chosen);
-
-    item.on("done", (_e, state) => {
-      log(`[download] done state="${state}" path="${item.getSavePath()}"`);
-    });
-    item.on("updated", (_e, state) => {
-      log(`[download] updated state="${state}"`);
-    });
-  });
-
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
+  currentPort = port;
+  currentServerReady = serverReady;
+  await openMainWindow(port, serverReady);
 }
 
 // --- App lifecycle ---
@@ -294,6 +348,17 @@ if (!gotLock) {
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
+  });
+
+  // macOS: clicking the dock icon with no open windows should reopen the UI.
+  // The Next server is kept alive, so we just open a fresh window against the
+  // same port instead of bootstrapping a second server.
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0 && currentPort) {
+      openMainWindow(currentPort, currentServerReady).catch((e) =>
+        console.error("[pi-desktop] activate: failed to reopen window:", e.message)
+      );
+    }
   });
 
   app.on("before-quit", () => {

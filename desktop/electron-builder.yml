@@ -1,15 +1,20 @@
-# electron-builder config for Pi Agent desktop (NSIS, perUser, Win x64).
+# electron-builder config for Pi Agent desktop.
 # Docs: https://www.electron.build/configuration
 #
 # Build with:  npm run desktop:build
 #   (runs `next build --webpack` first to produce .next/standalone/, then this)
 #
-# Output: dist-electron/Pi Agent Setup <version>.exe
+# Output by host platform:
+#   Windows -> dist-electron/Pi Agent Setup <version>.exe      (NSIS, perUser, x64)
+#   macOS   -> dist-electron/Pi Agent-<version>-arm64.dmg
+#              dist-electron/Pi Agent-<version>-x64.dmg
 #
-# Layout after packaging:
+# Layout after packaging (same on both platforms):
 #   resources/app/        <- Electron app package (main.cjs, lib, seeds, icon)
 #   resources/server/     <- Next.js standalone server (server.js + node_modules)
-# main.cjs finds the server at process.resourcesPath/server.
+#   resources/node/       <- Node 22 runtime (node.exe on Windows, node on macOS)
+# main.cjs finds the server at process.resourcesPath/server and the runtime at
+# process.resourcesPath/node.
 
 appId: works.earendil.pi-agent
 productName: Pi Agent
@@ -26,6 +31,12 @@ directories:
 # node_modules. Without this hook, electron-builder duplicates ~740 MB of deps
 # into the app package. See desktop/skip-deps.js.
 beforeBuild: desktop/skip-deps.js
+
+# Ad-hoc (re)sign the .app on macOS after packing. Without this an unsigned
+# arm64 build is rejected by macOS as "damaged" once it carries the quarantine
+# attribute (downloaded dmg). electron-builder's own signing is disabled via
+# mac.identity: null, so we do a plain `codesign --sign -` here. No-op on Windows.
+afterPack: desktop/after-pack-sign.cjs
 
 # What goes into the Electron app package (resources/app/). The desktop entry
 # + helpers are FLATTENED to the app root (not kept under desktop/) so that
@@ -50,8 +61,19 @@ files:
     filter:
       - "**/*"
       - "!make-icon.mjs"
+      - "!after-pack-sign.cjs"
       - "!win-eperm-patch.cjs"
       - "!electron-builder.yml"
+      # Build-only helpers: not required at runtime (the standalone server and
+      # pi SDK live in resources/server). Keeps resources/app/ minimal.
+      - "!fetch-node.cjs"
+      - "!ensure-standalone-chunks.cjs"
+      - "!skip-deps.js"
+      # The Node runtime ships via extraResources (resources/node/) — don't let
+      # the `**/*` glob duplicate the ~80 MB binary inside resources/app/.
+      - "!node-runtime/**"
+      - "!icon-build/**"
+      - "!*.md"
   - from: .
     to: .
     filter:
@@ -68,13 +90,18 @@ extraResources:
     to: server/.next/static
     filter: ["**/*"]
   # Ship a real Node 22 runtime. The Next.js standalone server.js is run with
-  # THIS node.exe, not electron.exe (ELECTRON_RUN_AS_NODE). Reason: Electron 33
-  # embeds Node 20.18, whose built-in undici/worker_threads lacks
+  # THIS node binary, not electron.exe (ELECTRON_RUN_AS_NODE). Reason: Electron
+  # 33 embeds Node 20.18, whose built-in undici/worker_threads lacks
   # `markAsUncloneable` — Next 16.2.9's @edge-runtime/primitives calls it, so
   # any API route touching the pi SDK throws "webidl.util.markAsUncloneable is
   # not a function" (HTTP 500). Node 22 has the API. Lands at resources/node/.
-  - from: desktop/node-runtime/node.exe
-    to: node/node.exe
+  #
+  # The runtime directory holds only the binary for the host platform/arch
+  # (node.exe on Windows, node on macOS — see desktop/fetch-node.cjs), so we copy
+  # that whole directory; `node*` matches either name.
+  - from: desktop/node-runtime
+    to: node
+    filter: ["node*"]
 
 # asar disabled for v1: the pi SDK does dynamic import(), absolute-path wasm
 # reads, and package.json walk-ups that can break inside an asar archive.
@@ -95,3 +122,42 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: Pi Agent
   uninstallDisplayName: Pi Agent
+
+# macOS: one dmg per architecture. electron-builder can build the x64 dmg on an
+# Apple Silicon host (it cross-packages), so a single M-series Mac produces both.
+# Docs: desktop-mac-plan.zh-CN.md / desktop-build-mac.zh-CN.md.
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  icon: desktop/icon.icns
+  category: public.app-category.developer-tools
+  # Always include the architecture in the dmg name. Without this electron-builder
+  # drops the suffix for the "default" arch (x64), producing a confusing
+  # `Pi Agent-0.8.0.dmg` next to `Pi Agent-0.8.0-arm64.dmg`.
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  # Unsigned distribution (no Apple Developer account). identity: null stops
+  # electron-builder from trying to discover a certificate; the app is then
+  # ad-hoc signed by desktop/after-pack-sign.cjs. Users still need one
+  # right-click > Open (or `xattr -rd com.apple.quarantine`) on first launch.
+  identity: null
+  hardenedRuntime: false               # required=false when not notarizing
+  gatekeeperAssess: false              # no signed dmg to assess
+  # Electron 33's minimum supported macOS.
+  minimumSystemVersion: "10.15"
+
+dmg:
+  # Plain drag-to-Applications layout.
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications

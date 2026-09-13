@@ -36,6 +36,51 @@ npm run desktop:build
 
 **从源码打包 / 踩坑记录：** 见 [docs/desktop-build.zh-CN.md](./docs/desktop-build.zh-CN.md)，包含完整打包流程、`desktop/` 下各文件职责，以及打包和分发过程中真实踩过的坑（EPERM 文件追踪、electron-builder `files` 的怪行为、内置 Node 22 运行时、杀毒软件误杀等）。
 
+## 桌面版（macOS）
+
+同样是独立的桌面软件——无需安装 Node.js 或 pi CLI，架构与 Windows 版一致。产物是**两个 `.dmg`**，按你的 CPU 选一个：
+
+| 文件 | 适用机器 |
+|------|----------|
+| `Pi Agent-<version>-arm64.dmg` | Apple Silicon（M1/M2/M3/M4，2020 年底起） |
+| `Pi Agent-<version>-x64.dmg` | Intel Mac（2020 年前） |
+
+**自行构建（必须在 macOS 上）：**
+
+```bash
+npm install
+npm run desktop:icon        # 生成 icon.ico + icon.icns（iconutil 需要 macOS）
+npm run desktop:build:mac   # 产出 dist-electron/Pi Agent-<version>-{arm64,x64}.dmg
+```
+
+在 Apple Silicon Mac 上可一次产出两个 dmg（electron-builder 会交叉打 x64）；Intel Mac 只能产 x64。
+
+**首次打开（重要）：** 未做代码签名/公证，Gatekeeper 会拦截，二选一：
+
+1. 打开 dmg，把 `Pi Agent` 拖进「应用程序」；在「应用程序」里找到它 **右键 → 打开**（不是双击），弹窗里再点「打开」。只需第一次。
+2. 或命令行一次性解除隔离：
+
+   ```bash
+   xattr -rd com.apple.quarantine "/Applications/Pi Agent.app"
+   ```
+
+如果提示「已损坏，无法打开」，说明 bundle 未通过 ad-hoc 校验，执行：
+
+```bash
+codesign --force --deep --sign - "/Applications/Pi Agent.app"
+```
+
+（正式构建流程已用 `desktop/after-pack-sign.cjs` 自动 ad-hoc 签名；若你手动改过 `.app` 内容则需重新签。）
+
+**注意事项：**
+
+- 与 pi CLI 共用 `~/.pi/agent`，首次运行同样会种入 `models.json` / `settings.json`（已存在则跳过）。
+- 未签名分发。想要「双击直开」需自备 Apple Developer 账号（$99/年）做 Developer ID 签名 + 公证。
+- 需要 git / npm / npx 的功能（worktree、技能/插件安装）：应用已把 Homebrew、`/usr/local/bin`、`~/.local/bin` 追加进子进程 PATH；若你的 node 装在 nvm/fnm/asdf 等别处，可能需要在 shell 里另行配置。
+- 开发模式（热重载）：`npm run desktop:dev`，局限同 Windows 版（见打包文档）。
+
+**从源码打包 / 踩坑记录（Mac）：** 见 [docs/desktop-build-mac.zh-CN.md](./docs/desktop-build-mac.zh-CN.md)——含 npm 12 的 `allow-remote`/install-scripts 拦截、`/Users/**` 追踪排除地雷、arm64 ad-hoc 签名等 Mac 特有坑。
+
 ## 功能介绍
 
 - **把历史工作接回来**：打开网页就能按项目找到以前的 pi 对话，不必在终端里翻文件或记住会话路径。

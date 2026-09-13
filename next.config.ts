@@ -9,6 +9,16 @@ try {
   piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
 } catch { /* package not found, use default */ }
 
+// @vercel/nft stray-EPERM guards are Windows-only. On POSIX we must NOT exclude
+// the home tree: Next matches these globs with `contains` against ABSOLUTE
+// paths, and the project is built under the user's home on macOS/Linux — so a
+// pattern like "/Users/**" silently excludes every traced file (the standalone
+// bundle then ships without its node_modules). See docs/desktop-build-mac.zh-CN.md.
+const nftExcludes =
+  process.platform === "win32"
+    ? ["C:\\Users\\**", "C:\\Program Files\\**", "C:\\Program Files (x86)\\**"]
+    : [];
+
 const nextConfig: NextConfig = {
   // Desktop packaging: produce a self-contained server in .next/standalone so
   // the Electron app can run it with plain `node server.js` (no `next` CLI at
@@ -31,13 +41,7 @@ const nextConfig: NextConfig = {
   // backfills those regardless, but excluding here keeps the build clean.
   // (See desktop/win-eperm-patch.cjs for the matching fs guard.)
   outputFileTracingExcludes: {
-    "*": [
-      "C:\\Users\\**",
-      "C:\\Program Files\\**",
-      "C:\\Program Files (x86)\\**",
-      "/Users/**",
-      "/home/**",
-    ],
+    "*": nftExcludes,
   },
   allowedDevOrigins: ['192.168.*.*'],
   async headers() {
